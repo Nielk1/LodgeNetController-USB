@@ -1,5 +1,10 @@
 #include <Arduino.h>
-#include "HID-Project.h"
+#include <HID-Project.h>
+#include "PluggableUSB.h"
+
+
+
+
 
 enum ProtocolMode {
   MODE_LN_NONE, // None
@@ -39,6 +44,155 @@ const uint8_t TIME_SKEW = 2;
 
 // PMOS gate logic: P-channel high-side, active LOW (gate LOW = power ON)
 #define PWR_ACTIVE_HIGH false
+
+#define GOOD_READS 5
+
+
+
+static uint8_t last_dpad = 0;
+static uint8_t last_menu = 0;
+static uint8_t good_reads = 0;
+
+
+
+const uint8_t customHIDReportDescriptor[] PROGMEM = {
+// Gamepad Input Report (Report ID 0)
+0x05, 0x01,        // Usage Page (Generic Desktop)
+0x09, 0x05,        // Usage (Gamepad)
+0xA1, 0x01,        // Collection (Application)
+  0x85, 0x00,      //   Report ID (0)
+  0x05, 0x09,      //   Usage Page (Button)
+  0x19, 0x01,      //   Usage Minimum (Button 1)
+  0x29, 0x11,      //   Usage Maximum (Button 17)
+  0x15, 0x00,      //   Logical Minimum (0)
+  0x25, 0x01,      //   Logical Maximum (1)
+  0x95, 0x11,      //   Report Count (17)
+  0x75, 0x01,      //   Report Size (1)
+  0x81, 0x02,      //   Input (Data,Var,Abs)
+  0x95, 0x01,      //   Report Count (1)
+  0x75, 0x07,      //   Report Size (7) - padding
+  0x81, 0x03,      //   Input (Const,Var,Abs)
+  // Axes
+  0x05, 0x01,      //   Usage Page (Generic Desktop)
+  0x09, 0x30,      //   Usage (X)
+  0x09, 0x31,      //   Usage (Y)
+  0x09, 0x32,      //   Usage (Z)
+  0x09, 0x33,      //   Usage (Rx)
+  0x09, 0x34,      //   Usage (Ry)
+  0x09, 0x35,      //   Usage (Rz)
+  0x16, 0x00, 0x80,//   Logical Minimum (-32768)
+  0x26, 0xFF, 0x7F,//   Logical Maximum (32767)
+  0x75, 0x10,      //   Report Size (16)
+  0x95, 0x06,      //   Report Count (6)
+  0x81, 0x02,      //   Input (Data,Var,Abs)
+// End Gamepad
+0xC0,              // End Collection
+
+// Vendor Feature Report (Report ID 1)
+0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
+0x09, 0x01,        // Usage (0x01)
+0xA1, 0x01,        // Collection (Application)
+  0x85, 0x01,      //   Report ID (1)
+  0x09, 0x02,      //   Usage (0x02)
+  0x15, 0x00,      //   Logical Minimum (0)
+  0x26, 0xFF, 0x00,//   Logical Maximum (255)
+  0x75, 0x08,      //   Report Size (8)
+  0x95, 0x01,      //   Report Count (1)
+  0xB1, 0x02,      //   Feature (Data,Var,Abs)
+0xC0               // End Collection
+};
+
+class MyCustomHID_ : public PluggableUSBModule {
+public:
+  MyCustomHID_() : PluggableUSBModule(1, 1, epType) {
+    PluggableUSB().plug(this);
+  }
+
+  int getInterface(uint8_t* interfaceCount) override {
+    // HID Interface Descriptor (9 bytes)
+    uint8_t interfaceDescriptor[] = {
+        0x09, // bLength
+        0x04, // bDescriptorType (Interface)
+        *interfaceCount, // bInterfaceNumber
+        0x00, // bAlternateSetting
+        0x01, // bNumEndpoints
+        0x03, // bInterfaceClass (HID)
+        0x00, // bInterfaceSubClass
+        0x00, // bInterfaceProtocol
+        0x00  // iInterface
+    };
+    USB_SendControl(0, interfaceDescriptor, sizeof(interfaceDescriptor));
+
+    // HID Descriptor (9 bytes)
+    uint8_t hidDescriptor[] = {
+        0x09, // bLength
+        0x21, // bDescriptorType (HID)
+        0x11, 0x01, // bcdHID
+        0x00, // bCountryCode
+        0x01, // bNumDescriptors
+        0x22, // bDescriptorType (Report)
+        (uint8_t)sizeof(customHIDReportDescriptor), (uint8_t)(sizeof(customHIDReportDescriptor) >> 8) // wDescriptorLength
+    };
+    USB_SendControl(0, hidDescriptor, sizeof(hidDescriptor));
+
+    // Endpoint Descriptor (7 bytes)
+    uint8_t endpointDescriptor[] = {
+        0x07, // bLength
+        0x05, // bDescriptorType (Endpoint)
+        0x81, // bEndpointAddress (IN endpoint 1)
+        0x03, // bmAttributes (Interrupt)
+        0x08, 0x00, // wMaxPacketSize (8 bytes)
+        0x0A  // bInterval (10 ms)
+    };
+    USB_SendControl(0, endpointDescriptor, sizeof(endpointDescriptor));
+
+    (*interfaceCount)++;
+    return sizeof(interfaceDescriptor) + sizeof(hidDescriptor) + sizeof(endpointDescriptor);
+  }
+
+  int getDescriptor(USBSetup& setup) override {
+    if (setup.wValueH == HID_REPORT_DESCRIPTOR_TYPE) {
+      // Send the report descriptor
+      USB_SendControl(TRANSFER_PGM, customHIDReportDescriptor, sizeof(customHIDReportDescriptor));
+      return sizeof(customHIDReportDescriptor);
+    }
+    return 0;
+  }
+
+  bool setup(USBSetup& setup) override {
+    // Handle HID class requests for the feature report (Report ID 1)
+    if (setup.bmRequestType == REQUEST_DEVICETOHOST_CLASS_INTERFACE &&
+        setup.bRequest == HID_GET_REPORT &&
+        setup.wValueH == 3 && (setup.wValueL == 1)) { // Feature report, Report ID 1
+      uint8_t buffer[2];
+      buffer[0] = 0x01; // Report ID 1
+      if (good_reads < GOOD_READS) {
+        buffer[1] = DEVICE_NONE;
+      } else {
+        buffer[1] = device;
+      }
+      USB_SendControl(0, buffer, 2);
+      return true;
+    }
+    if (setup.bmRequestType == REQUEST_HOSTTODEVICE_CLASS_INTERFACE &&
+        setup.bRequest == HID_SET_REPORT &&
+        setup.wValueH == 3 && (setup.wValueL == 1)) { // Feature report, Report ID 1
+      // Optionally handle host-to-device feature report writes here
+      return true;
+    }
+    return false;
+  }
+
+private:
+  static const uint8_t epType[1];
+};
+
+const uint8_t MyCustomHID_::epType[1] = { EP_TYPE_INTERRUPT_IN };
+
+MyCustomHID_ MyCustomHID;
+
+
+
 
 inline void clk1_high() {
   #ifdef PWR_ACTIVE_HIGH
@@ -120,6 +274,10 @@ inline uint8_t read_byte_mcu()
   return value;
 }
 
+void EmitActiveController() {
+  // Nothing needed here for now; feature report is handled in setup()
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -127,13 +285,11 @@ void setup() {
   clk1_high();
   clk2_high();
 
+  // No RawHID.begin();
   Gamepad.begin();
 
   Serial.println(F("LodgeNet USB test host starting..."));
 }
-
-static uint8_t last_dpad = 0;
-static uint8_t last_menu = 0;
 
 void loop() {
   switch(proto)
@@ -142,7 +298,10 @@ void loop() {
       proto = MODE_LN_SR; // switch to SR mode for testing
       last_dpad = 0;
       last_menu = 0;
-      
+      good_reads = 0;
+
+      EmitActiveController();
+
       Gamepad.releaseAll();
       Gamepad.dPad1(0);
       Gamepad.xAxis(0);
@@ -179,6 +338,7 @@ void loop() {
           device = DEVICE_NONE;
           last_dpad = 0;
           last_menu = 0;
+          good_reads = 0;
 
           // No controller present, skip processing
           delay(60); // wait before next read
@@ -186,6 +346,15 @@ void loop() {
         }
 
         device = DEVICE_LN_SNES;
+        if (good_reads < GOOD_READS)
+        {
+          good_reads++;
+          if (good_reads == GOOD_READS) {
+            EmitActiveController();
+          }else{
+            break; // don't count this read
+          }
+        }
 
         // dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
         uint8_t dpad = (~value >> 4) & 0x03;
@@ -265,6 +434,7 @@ void loop() {
           device = DEVICE_NONE;
           last_dpad = 0;
           last_menu = 0;
+          good_reads = 0;
           delay(65); // wait before next read
           break;
         }
@@ -276,8 +446,19 @@ void loop() {
           device = DEVICE_NONE;
           last_dpad = 0;
           last_menu = 0;
+          good_reads = 0;
           delay(65); // wait before next read
           break;
+        }
+
+        if (good_reads < GOOD_READS)
+        {
+          good_reads++;
+          if (good_reads == GOOD_READS) {
+            EmitActiveController();
+          }else{
+            break; // don't count this read
+          }
         }
 
         uint8_t x_axis1 = read_byte_mcu();
