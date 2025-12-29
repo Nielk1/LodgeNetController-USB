@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "HID-Project.h"
 
 enum ProtocolMode {
   MODE_LN_NONE, // None
@@ -38,8 +39,6 @@ const uint8_t TIME_SKEW = 2;
 
 // PMOS gate logic: P-channel high-side, active LOW (gate LOW = power ON)
 #define PWR_ACTIVE_HIGH false
-
-void print_bits_array(const uint8_t *bits);
 
 inline void clk1_high() {
   #ifdef PWR_ACTIVE_HIGH
@@ -128,14 +127,9 @@ void setup() {
   clk1_high();
   clk2_high();
 
+  Gamepad.begin();
+
   Serial.println(F("LodgeNet USB test host starting..."));
-  //if (CONTROLLER_MODE == MODE_LN_SNES) {
-  //  Serial.println(F("Mode: LN-SNES"));
-  //} else if (CONTROLLER_MODE == MODE_LN_N64) {
-  //  Serial.println(F("Mode: LN-N64"));
-  //} else {
-  //  Serial.println(F("Mode: LN-GC"));
-  //}
 }
 
 static uint8_t last_dpad = 0;
@@ -148,6 +142,17 @@ void loop() {
       proto = MODE_LN_SR; // switch to SR mode for testing
       last_dpad = 0;
       last_menu = 0;
+      
+      Gamepad.releaseAll();
+      Gamepad.dPad1(0);
+      Gamepad.xAxis(0);
+      Gamepad.yAxis(0);
+      Gamepad.zAxis(0);
+      Gamepad.rxAxis(0);
+      Gamepad.ryAxis(0);
+      Gamepad.rzAxis(0);
+      Gamepad.write();
+
       delay(1000); // wait before next read
       break;
     case MODE_LN_SR:
@@ -176,7 +181,6 @@ void loop() {
           last_menu = 0;
 
           // No controller present, skip processing
-          Serial.println("No SR controller detected checking for MCU next.");
           delay(60); // wait before next read
           break;
         }
@@ -201,24 +205,42 @@ void loop() {
         }
         last_dpad = dpad;
 
-        Serial.print("SNES");
-        Serial.print("   Menu: "        + String(((value >> 15) & 0x01) ? 0 : 1));
-        Serial.print("   Reset/Order: " + String(((value >> 14) & 0x01) ? 0 : 1));
-        Serial.print("   -: "           + String(ButtonMinus ? 1 : 0));
-        Serial.print("   +: "           + String(ButtonPlus  ? 1 : 0));
-        Serial.print("   B: "           + String(((value >> 13) & 0x01) ? 0 : 1));
-        Serial.print("   Y: "           + String(((value >> 12) & 0x01) ? 0 : 1));
-        Serial.print("   Select: "      + String(((value >> 11) & 0x01) ? 0 : 1));
-        Serial.print("   Start/*: "     + String(((value >> 10) & 0x01) ? 0 : 1));
-        Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-        Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-        Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-        Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-        Serial.print("   A: "           + String(((value >>  3) & 0x01) ? 0 : 1));
-        Serial.print("   X: "           + String(((value >>  2) & 0x01) ? 0 : 1));
-        Serial.print("   L: "           + String(((value >>  1) & 0x01) ? 0 : 1));
-        Serial.print("   R: "           + String(((value >>  0) & 0x01) ? 0 : 1));
-        Serial.println();
+        Gamepad.releaseAll();
+
+        static uint8_t hid_dpad = GAMEPAD_DPAD_CENTERED;
+        switch(last_dpad){
+          case 0x01: hid_dpad = GAMEPAD_DPAD_RIGHT; break;
+          case 0x02: hid_dpad = GAMEPAD_DPAD_LEFT; break;
+          case 0x04: hid_dpad = GAMEPAD_DPAD_DOWN; break;
+          case 0x08: hid_dpad = GAMEPAD_DPAD_UP; break;
+          case 0x05: hid_dpad = GAMEPAD_DPAD_DOWN_RIGHT; break;
+          case 0x06: hid_dpad = GAMEPAD_DPAD_DOWN_LEFT; break;
+          case 0x09: hid_dpad = GAMEPAD_DPAD_UP_RIGHT; break;
+          case 0x0A: hid_dpad = GAMEPAD_DPAD_UP_LEFT; break;
+          default:   hid_dpad = GAMEPAD_DPAD_CENTERED; break;
+        }
+        Gamepad.dPad1(hid_dpad);
+
+        if (!((value >> 13) & 0x01)) Gamepad.press(1);
+        if (!((value >>  3) & 0x01)) Gamepad.press(2);
+        if (!((value >> 12) & 0x01)) Gamepad.press(3);
+        if (!((value >>  2) & 0x01)) Gamepad.press(4);
+        if (!((value >> 11) & 0x01)) Gamepad.press(5);
+        if (!((value >> 10) & 0x01)) Gamepad.press(6);
+        if (!((value >>  1) & 0x01)) Gamepad.press(7);
+        if (!((value >>  0) & 0x01)) Gamepad.press(8);
+        if (!((value >> 14) & 0x01)) Gamepad.press(12);
+        if (ButtonPlus) Gamepad.press(14);
+        if (! ((value >> 15) & 0x01)) Gamepad.press(15);
+        if (ButtonMinus) Gamepad.press(17);
+
+        Gamepad.xAxis(0);
+        Gamepad.yAxis(0);
+        Gamepad.zAxis(0);
+        Gamepad.rxAxis(0);
+        Gamepad.ryAxis(0);
+        Gamepad.rzAxis(0);
+        Gamepad.write();
 
         delay(65); // wait before next read
       }
@@ -243,7 +265,6 @@ void loop() {
           device = DEVICE_NONE;
           last_dpad = 0;
           last_menu = 0;
-          Serial.println("No MCU controller detected checking for NONE next.");
           delay(65); // wait before next read
           break;
         }
@@ -255,7 +276,6 @@ void loop() {
           device = DEVICE_NONE;
           last_dpad = 0;
           last_menu = 0;
-          Serial.println("No MCU controller detected checking for NONE next.");
           delay(65); // wait before next read
           break;
         }
@@ -304,89 +324,74 @@ void loop() {
             last_menu = 0;
         }
 
-        switch(device){
-          case DEVICE_LN_N64:
-            Serial.print("N64 ");
-            break;
-          case DEVICE_LN_GC:
-            Serial.print("GC  ");
-            break;
+
+
+        Gamepad.releaseAll();
+
+        static uint8_t hid_dpad = GAMEPAD_DPAD_CENTERED;
+        switch(last_dpad){
+          case 0x01: hid_dpad = GAMEPAD_DPAD_RIGHT; break;
+          case 0x02: hid_dpad = GAMEPAD_DPAD_LEFT; break;
+          case 0x04: hid_dpad = GAMEPAD_DPAD_DOWN; break;
+          case 0x08: hid_dpad = GAMEPAD_DPAD_UP; break;
+          case 0x05: hid_dpad = GAMEPAD_DPAD_DOWN_RIGHT; break;
+          case 0x06: hid_dpad = GAMEPAD_DPAD_DOWN_LEFT; break;
+          case 0x09: hid_dpad = GAMEPAD_DPAD_UP_RIGHT; break;
+          case 0x0A: hid_dpad = GAMEPAD_DPAD_UP_LEFT; break;
+          default:   hid_dpad = GAMEPAD_DPAD_CENTERED; break;
         }
-        //print_bits_array(&buttons1);
-        //Serial.print(" ");
-        //print_bits_array(&buttons2);
+        Gamepad.dPad1(hid_dpad);
 
-        Serial.print("   Reset: "       + String((encoded_type == 1) ? 1 : 0)); // Reset: all 4
-        Serial.print("   Menu: "        + String((encoded_type == 2) ? 1 : 0)); // Menu: up+down
-        Serial.print("   *: "           + String((encoded_type == 3) ? 1 : 0)); // *: left+right
-        Serial.print("   Select: "      + String((encoded_type == 4) ? 1 : 0)); // Select: up+down+right
-        Serial.print("   Order: "       + String((encoded_type == 5) ? 1 : 0)); // Order: up+left+right
-        Serial.print("   #: "           + String((encoded_type == 6) ? 1 : 0)); // #: up+down+left
+        if (!((buttons1 >> 6) & 0x01)) Gamepad.press(1);
+        if (!((buttons1 >> 7) & 0x01)) Gamepad.press(2);
+        if (!((buttons1 >> 5) & 0x01)) Gamepad.press(5);
+        if (!((buttons1 >> 4) & 0x01)) Gamepad.press(6);
+        if (!((buttons2 >> 5) & 0x01)) Gamepad.press(7);
+        if (!((buttons2 >> 4) & 0x01)) Gamepad.press(8);
 
-        Serial.print("   A: "           + String(((buttons1 >> 7) & 0x01) ? 0 : 1));
-        Serial.print("   B: "           + String(((buttons1 >> 6) & 0x01) ? 0 : 1));
-        Serial.print("   Z: "           + String(((buttons1 >> 5) & 0x01) ? 0 : 1));
-        Serial.print("   Start: "       + String(((buttons1 >> 4) & 0x01) ? 0 : 1));
-        Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-        Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-        Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-        Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-        Serial.print("   L: "           + String(((buttons2 >> 5) & 0x01) ? 0 : 1));
-        Serial.print("   R: "           + String(((buttons2 >> 4) & 0x01) ? 0 : 1));
-       
-        switch(device){
-          case DEVICE_LN_N64:
-            Serial.print("   C-Up: "        + String(((buttons2 >> 3) & 0x01) ? 0 : 1));
-            Serial.print("   C-Down: "      + String(((buttons2 >> 2) & 0x01) ? 0 : 1));
-            Serial.print("   C-Left: "      + String(((buttons2 >> 1) & 0x01) ? 0 : 1));
-            Serial.print("   C-Right: "     + String(((buttons2 >> 0) & 0x01) ? 0 : 1));
-            break;
-          case DEVICE_LN_GC:
-            Serial.print("   Y: "           + String(((buttons2 >> 3) & 0x01) ? 0 : 1));
-            Serial.print("   Z: "           + String(((buttons2 >> 2) & 0x01) ? 0 : 1));
-            break;
-        }
+        if (encoded_type == 5) Gamepad.press(12); // Order: up+left+right
+        if (encoded_type == 1) Gamepad.press(13); // Reset: all 4
+        if (encoded_type == 2) Gamepad.press(14); // Menu: up+down
+        if (encoded_type == 6) Gamepad.press(15); // #: up+down+left
+        if (encoded_type == 4) Gamepad.press(16); // Select: up+down+right
+        if (encoded_type == 3) Gamepad.press(17); // *: left+right
 
-        char buf[6];
+        Gamepad.xAxis(0);
+        Gamepad.yAxis(0);
+        Gamepad.zAxis(0);
+        Gamepad.rxAxis(0);
+        Gamepad.ryAxis(0);
+        Gamepad.rzAxis(0);
+
         if (device == DEVICE_LN_N64) {
-          sprintf(buf, "%4d", x_axis);
-          Serial.print(" X: "); Serial.print(buf);
-          sprintf(buf, "%4d", y_axis);
-          Serial.print(" Y: "); Serial.print(buf);
+          if (!((buttons2 >> 3) & 0x01)) Gamepad.press(9);
+          if (!((buttons2 >> 2) & 0x01)) Gamepad.press(4);
+          if (!((buttons2 >> 1) & 0x01)) Gamepad.press(3);
+          if (!((buttons2 >> 0) & 0x01)) Gamepad.press(10);
+          
+          // N64: signed int8_t, range -128..127
+          Gamepad.xAxis(x_axis * 256);
+          Gamepad.yAxis(y_axis * -256);
         }
         if (device == DEVICE_LN_GC) {
-          sprintf(buf, "%3d", x_axis1);
-          Serial.print(" X1: "); Serial.print(buf);
-          sprintf(buf, "%3d", y_axis1);
-          Serial.print(" Y1: "); Serial.print(buf);
+          if (!((buttons2 >> 3) & 0x01)) Gamepad.press(3);
+          if (!((buttons2 >> 2) & 0x01)) Gamepad.press(4);
 
-          sprintf(buf, "%3d", x_axis2);
-          Serial.print(" X2: "); Serial.print(buf);
-          sprintf(buf, "%3d", y_axis2);
-          Serial.print(" Y2: "); Serial.print(buf);
-          
-          sprintf(buf, "%3d", l_trigger);
-          Serial.print(" L: "); Serial.print(buf);
-          sprintf(buf, "%3d", r_trigger);
-          Serial.print(" R: "); Serial.print(buf);
+          // GC: unsigned uint8_t, range 0..255, convert to signed
+          Gamepad.xAxis(((int16_t)x_axis1 - 128) * 256);
+          Gamepad.yAxis(((int16_t)y_axis1 - 128) * -256);
+
+          Gamepad.rxAxis(((int16_t)x_axis2 - 128) * 256);
+          Gamepad.ryAxis(((int16_t)y_axis2 - 128) * -256);
+
+          Gamepad.zAxis(((int16_t)l_trigger - 128));
+          Gamepad.rzAxis(((int16_t)r_trigger - 128));
         }
 
-        Serial.println();
+        Gamepad.write();
 
         delay(65);
       }
       break;
-  }
-}
-
-
-
-void print_bits_array(const uint8_t *bits) {
-  for (int i = 7; i >= 0; i--) {
-    if (bits[0] & (1 << i)) {
-      Serial.print('1');
-    } else {
-      Serial.print('0');
-    }
   }
 }
