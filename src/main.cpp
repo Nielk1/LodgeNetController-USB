@@ -1,9 +1,6 @@
 #include <Arduino.h>
-#include <HID-Project.h>
 #include "PluggableUSB.h"
-
-
-
+#include "HID.h"
 
 
 enum ProtocolMode {
@@ -56,11 +53,11 @@ static uint8_t good_reads = 0;
 
 
 const uint8_t customHIDReportDescriptor[] PROGMEM = {
-// Gamepad Input Report (Report ID 0)
+// Gamepad Input Report (Report ID 1)
 0x05, 0x01,        // Usage Page (Generic Desktop)
 0x09, 0x05,        // Usage (Gamepad)
 0xA1, 0x01,        // Collection (Application)
-  0x85, 0x00,      //   Report ID (0)
+  0x85, 0x01,      //   Report ID (1)
   0x05, 0x09,      //   Usage Page (Button)
   0x19, 0x01,      //   Usage Minimum (Button 1)
   0x29, 0x11,      //   Usage Maximum (Button 17)
@@ -88,11 +85,11 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
 // End Gamepad
 0xC0,              // End Collection
 
-// Vendor Feature Report (Report ID 1)
+// Vendor Feature Report (Report ID 2)
 0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
 0x09, 0x01,        // Usage (0x01)
 0xA1, 0x01,        // Collection (Application)
-  0x85, 0x01,      //   Report ID (1)
+  0x85, 0x02,      //   Report ID (2)
   0x09, 0x02,      //   Usage (0x02)
   0x15, 0x00,      //   Logical Minimum (0)
   0x26, 0xFF, 0x00,//   Logical Maximum (255)
@@ -104,98 +101,112 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
 
 class MyCustomHID_ : public PluggableUSBModule {
 public:
-  MyCustomHID_() : PluggableUSBModule(1, 1, epType) {
-    PluggableUSB().plug(this);
+  MyCustomHID_() :
+    PluggableUSBModule(1, 1, epType), _endpointIn(0)
+  {
+    epType[0] = EP_TYPE_INTERRUPT_IN;
+    PluggableUSB().plug(this);      // allocates pluggedInterface & pluggedEndpoint
+    _endpointIn = pluggedEndpoint;  // now it's valid
   }
 
   int getInterface(uint8_t* interfaceCount) override {
-    // HID Interface Descriptor (9 bytes)
-    uint8_t interfaceDescriptor[] = {
-        0x09, // bLength
-        0x04, // bDescriptorType (Interface)
-        *interfaceCount, // bInterfaceNumber
-        0x00, // bAlternateSetting
-        0x01, // bNumEndpoints
-        0x03, // bInterfaceClass (HID)
-        0x00, // bInterfaceSubClass
-        0x00, // bInterfaceProtocol
-        0x00  // iInterface
-    };
-    USB_SendControl(0, interfaceDescriptor, sizeof(interfaceDescriptor));
+    *interfaceCount += 1; // we use 1 interface
 
-    // HID Descriptor (9 bytes)
-    uint8_t hidDescriptor[] = {
-        0x09, // bLength
-        0x21, // bDescriptorType (HID)
-        0x11, 0x01, // bcdHID
-        0x00, // bCountryCode
-        0x01, // bNumDescriptors
-        0x22, // bDescriptorType (Report)
-        (uint8_t)sizeof(customHIDReportDescriptor), (uint8_t)(sizeof(customHIDReportDescriptor) >> 8) // wDescriptorLength
+    HIDDescriptor hidInterface = {
+      // InterfaceDescriptor
+      {
+        sizeof(InterfaceDescriptor), // len = 9
+        0x04,                        // dtype = INTERFACE
+        pluggedInterface,            // number = interface number assigned by core
+        0x00,                        // alternate
+        0x01,                        // numEndpoints
+        0x03,                        // interfaceClass = HID
+        0x00,                        // interfaceSubClass
+        0x00,                        // protocol
+        0x00                         // iInterface
+      },
+      // HIDDescDescriptor
+      {
+        sizeof(HIDDescDescriptor),   // len = 9
+        0x21,                        // dtype = HID
+        0x01,                        // addr = bNumDescriptors (we have 1)
+        0x11,                        // versionL = low byte of bcdHID (0x0111)
+        0x01,                        // versionH = high byte of bcdHID
+        0x00,                        // country = 0 (not localized)
+        0x22,                        // desctype = Report
+        (uint8_t)sizeof(customHIDReportDescriptor),              // descLenL
+        (uint8_t)(sizeof(customHIDReportDescriptor) >> 8)        // descLenH
+      },
+      // EndpointDescriptor
+      {
+        sizeof(EndpointDescriptor),       // len = 7
+        0x05,                             // dtype = ENDPOINT
+        USB_ENDPOINT_IN(_endpointIn),     // addr = IN | endpoint number
+        0x03,                             // attr = Interrupt
+        0x000F,                           // packetSize = 15 bytes
+        0x0A                              // interval = 10 ms
+      }
     };
-    USB_SendControl(0, hidDescriptor, sizeof(hidDescriptor));
 
-    // Endpoint Descriptor (7 bytes)
-    uint8_t endpointDescriptor[] = {
-        0x07, // bLength
-        0x05, // bDescriptorType (Endpoint)
-        0x81, // bEndpointAddress (IN endpoint 1)
-        0x03, // bmAttributes (Interrupt)
-        0x08, 0x00, // wMaxPacketSize (8 bytes)
-        0x0A  // bInterval (10 ms)
-    };
-    USB_SendControl(0, endpointDescriptor, sizeof(endpointDescriptor));
-
-    (*interfaceCount)++;
-    return sizeof(interfaceDescriptor) + sizeof(hidDescriptor) + sizeof(endpointDescriptor);
+    return USB_SendControl(0, &hidInterface, sizeof(hidInterface));
   }
 
   int getDescriptor(USBSetup& setup) override {
-    if (setup.wValueH == HID_REPORT_DESCRIPTOR_TYPE) {
-      // Send the report descriptor
-      USB_SendControl(TRANSFER_PGM, customHIDReportDescriptor, sizeof(customHIDReportDescriptor));
-      return sizeof(customHIDReportDescriptor);
-    }
-    return 0;
+    // Only answer HID report descriptor requests for *our* interface
+    if (setup.bmRequestType != REQUEST_DEVICETOHOST_STANDARD_INTERFACE) return 0;
+    if (setup.wValueH != HID_REPORT_DESCRIPTOR_TYPE) return 0;
+    if (setup.wIndex != pluggedInterface) return 0;
+
+    return USB_SendControl(TRANSFER_PGM,
+                           customHIDReportDescriptor,
+                           sizeof(customHIDReportDescriptor));
   }
 
   bool setup(USBSetup& setup) override {
-    // Handle HID class requests for the feature report (Report ID 1)
+    if (setup.wIndex != pluggedInterface) {
+      return false; // not for us
+    }
+
     if (setup.bmRequestType == REQUEST_DEVICETOHOST_CLASS_INTERFACE &&
-        setup.bRequest == HID_GET_REPORT &&
-        setup.wValueH == 3 && (setup.wValueL == 1)) { // Feature report, Report ID 1
+        setup.bRequest     == HID_GET_REPORT &&
+        setup.wValueH      == HID_REPORT_TYPE_FEATURE &&
+        setup.wValueL      == 2) // Report ID 2
+    {
       uint8_t buffer[2];
-      buffer[0] = 0x01; // Report ID 1
-      if (good_reads < GOOD_READS) {
-        buffer[1] = DEVICE_NONE;
-      } else {
-        buffer[1] = device;
-      }
-      USB_SendControl(0, buffer, 2);
+      buffer[0] = 0x02; // Report ID 2
+      buffer[1] = (good_reads < GOOD_READS) ? DEVICE_NONE : device;
+      USB_SendControl(0, buffer, sizeof(buffer));
       return true;
     }
+
     if (setup.bmRequestType == REQUEST_HOSTTODEVICE_CLASS_INTERFACE &&
-        setup.bRequest == HID_SET_REPORT &&
-        setup.wValueH == 3 && (setup.wValueL == 1)) { // Feature report, Report ID 1
-      // Optionally handle host-to-device feature report writes here
+        setup.bRequest     == HID_SET_REPORT &&
+        setup.wValueH      == HID_REPORT_TYPE_FEATURE &&
+        setup.wValueL      == 2)
+    {
+      // Optional: read data if you want to consume host->device feature report
+      // uint8_t buf[1]; USB_RecvControl(buf, 1);
       return true;
     }
+
     return false;
   }
 
-private:
-  static const uint8_t epType[1];
-};
+  uint8_t getEndpoint() const { return _endpointIn; }
 
-const uint8_t MyCustomHID_::epType[1] = { EP_TYPE_INTERRUPT_IN };
+private:
+  uint8_t epType[1];
+  uint8_t _endpointIn;
+};
 
 MyCustomHID_ MyCustomHID;
 
 
 
 
+
 inline void clk1_high() {
-  #ifdef PWR_ACTIVE_HIGH
+  #if PWR_ACTIVE_HIGH
     PORTD &= ~_BV(D_CLK1);
   #else
     PORTD |= _BV(D_CLK1);
@@ -203,7 +214,7 @@ inline void clk1_high() {
 }
 
 inline void clk1_low() {
-  #ifdef PWR_ACTIVE_HIGH
+  #if PWR_ACTIVE_HIGH
     PORTD |= _BV(D_CLK1);
   #else
     PORTD &= ~_BV(D_CLK1);
@@ -263,7 +274,7 @@ inline void clock_mpu_hello() {
 /// @return The byte read from the MCU
 inline uint8_t read_byte_mcu()
 {
-  uint8_t value;
+  uint8_t value = 0;
   for(int j=0;j<8;j++){
     clk1_low();
     delayMicroseconds(4 + TIME_SKEW);
@@ -285,9 +296,6 @@ void setup() {
   clk1_high();
   clk2_high();
 
-  // No RawHID.begin();
-  Gamepad.begin();
-
   Serial.println(F("LodgeNet USB test host starting..."));
 }
 
@@ -302,15 +310,19 @@ void loop() {
 
       EmitActiveController();
 
-      Gamepad.releaseAll();
-      Gamepad.dPad1(0);
-      Gamepad.xAxis(0);
-      Gamepad.yAxis(0);
-      Gamepad.zAxis(0);
-      Gamepad.rxAxis(0);
-      Gamepad.ryAxis(0);
-      Gamepad.rzAxis(0);
-      Gamepad.write();
+      // Send neutral gamepad report (all released, axes centered)
+      uint8_t report[15] = {0};
+      report[0] = 0x01; // Report ID 1
+      // Buttons: 17 bits, little-endian
+      report[1] = 0x00;
+      report[2] = 0x00;
+      report[3] = 0x00;
+      // Axes: 6 x int16_t, all zero (centered)
+      for (int i = 0; i < 6; ++i) {
+        report[4 + i * 2] = 0x00;
+        report[5 + i * 2] = 0x00;
+      }
+      USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
 
       delay(1000); // wait before next read
       break;
@@ -374,42 +386,33 @@ void loop() {
         }
         last_dpad = dpad;
 
-        Gamepad.releaseAll();
-
-        static uint8_t hid_dpad = GAMEPAD_DPAD_CENTERED;
-        switch(last_dpad){
-          case 0x01: hid_dpad = GAMEPAD_DPAD_RIGHT; break;
-          case 0x02: hid_dpad = GAMEPAD_DPAD_LEFT; break;
-          case 0x04: hid_dpad = GAMEPAD_DPAD_DOWN; break;
-          case 0x08: hid_dpad = GAMEPAD_DPAD_UP; break;
-          case 0x05: hid_dpad = GAMEPAD_DPAD_DOWN_RIGHT; break;
-          case 0x06: hid_dpad = GAMEPAD_DPAD_DOWN_LEFT; break;
-          case 0x09: hid_dpad = GAMEPAD_DPAD_UP_RIGHT; break;
-          case 0x0A: hid_dpad = GAMEPAD_DPAD_UP_LEFT; break;
-          default:   hid_dpad = GAMEPAD_DPAD_CENTERED; break;
+        // Build and send custom gamepad report
+        uint8_t report[15] = {0};
+        report[0] = 0x01; // Report ID 1
+        uint32_t buttons = 0;
+        // Map SNES buttons to report bits
+        if (!((value >> 13) & 0x01)) buttons |= (1 << 0);  // B
+        if (!((value >>  3) & 0x01)) buttons |= (1 << 1);  // Y
+        if (!((value >> 12) & 0x01)) buttons |= (1 << 2);  // Select
+        if (!((value >>  2) & 0x01)) buttons |= (1 << 3);  // Start
+        if (!((value >> 11) & 0x01)) buttons |= (1 << 4);  // Up
+        if (!((value >> 10) & 0x01)) buttons |= (1 << 5);  // Down
+        if (!((value >>  1) & 0x01)) buttons |= (1 << 6);  // Left
+        if (!((value >>  0) & 0x01)) buttons |= (1 << 7);  // Right
+        if (!((value >> 14) & 0x01)) buttons |= (1 << 11); // L
+        if (ButtonPlus) buttons |= (1 << 13);              // Plus
+        if (!((value >> 15) & 0x01)) buttons |= (1 << 14); // R
+        if (ButtonMinus) buttons |= (1 << 16);             // Minus
+        // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+        // Axes: all zero for SNES
+        report[1] = buttons & 0xFF;
+        report[2] = (buttons >> 8) & 0xFF;
+        report[3] = (buttons >> 16) & 0xFF;
+        for (int i = 0; i < 6; ++i) {
+          report[4 + i * 2] = 0x00;
+          report[5 + i * 2] = 0x00;
         }
-        Gamepad.dPad1(hid_dpad);
-
-        if (!((value >> 13) & 0x01)) Gamepad.press(1);
-        if (!((value >>  3) & 0x01)) Gamepad.press(2);
-        if (!((value >> 12) & 0x01)) Gamepad.press(3);
-        if (!((value >>  2) & 0x01)) Gamepad.press(4);
-        if (!((value >> 11) & 0x01)) Gamepad.press(5);
-        if (!((value >> 10) & 0x01)) Gamepad.press(6);
-        if (!((value >>  1) & 0x01)) Gamepad.press(7);
-        if (!((value >>  0) & 0x01)) Gamepad.press(8);
-        if (!((value >> 14) & 0x01)) Gamepad.press(12);
-        if (ButtonPlus) Gamepad.press(14);
-        if (! ((value >> 15) & 0x01)) Gamepad.press(15);
-        if (ButtonMinus) Gamepad.press(17);
-
-        Gamepad.xAxis(0);
-        Gamepad.yAxis(0);
-        Gamepad.zAxis(0);
-        Gamepad.rxAxis(0);
-        Gamepad.ryAxis(0);
-        Gamepad.rzAxis(0);
-        Gamepad.write();
+        USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
 
         delay(65); // wait before next read
       }
@@ -507,69 +510,65 @@ void loop() {
 
 
 
-        Gamepad.releaseAll();
+        // Build and send custom gamepad report for MCU devices
+        uint8_t report[15] = {0};
+        report[0] = 0x01; // Report ID 1
+        uint32_t buttons = 0;
+        // Map buttons for N64/GC
+        if (!((buttons1 >> 6) & 0x01)) buttons |= (1 << 0);  // A
+        if (!((buttons1 >> 7) & 0x01)) buttons |= (1 << 1);  // B
+        if (!((buttons1 >> 5) & 0x01)) buttons |= (1 << 4);  // Z
+        if (!((buttons1 >> 4) & 0x01)) buttons |= (1 << 5);  // Start
+        if (!((buttons2 >> 5) & 0x01)) buttons |= (1 << 6);  // C-Up
+        if (!((buttons2 >> 4) & 0x01)) buttons |= (1 << 7);  // C-Down
 
-        static uint8_t hid_dpad = GAMEPAD_DPAD_CENTERED;
-        switch(last_dpad){
-          case 0x01: hid_dpad = GAMEPAD_DPAD_RIGHT; break;
-          case 0x02: hid_dpad = GAMEPAD_DPAD_LEFT; break;
-          case 0x04: hid_dpad = GAMEPAD_DPAD_DOWN; break;
-          case 0x08: hid_dpad = GAMEPAD_DPAD_UP; break;
-          case 0x05: hid_dpad = GAMEPAD_DPAD_DOWN_RIGHT; break;
-          case 0x06: hid_dpad = GAMEPAD_DPAD_DOWN_LEFT; break;
-          case 0x09: hid_dpad = GAMEPAD_DPAD_UP_RIGHT; break;
-          case 0x0A: hid_dpad = GAMEPAD_DPAD_UP_LEFT; break;
-          default:   hid_dpad = GAMEPAD_DPAD_CENTERED; break;
-        }
-        Gamepad.dPad1(hid_dpad);
-
-        if (!((buttons1 >> 6) & 0x01)) Gamepad.press(1);
-        if (!((buttons1 >> 7) & 0x01)) Gamepad.press(2);
-        if (!((buttons1 >> 5) & 0x01)) Gamepad.press(5);
-        if (!((buttons1 >> 4) & 0x01)) Gamepad.press(6);
-        if (!((buttons2 >> 5) & 0x01)) Gamepad.press(7);
-        if (!((buttons2 >> 4) & 0x01)) Gamepad.press(8);
-
-        if (encoded_type == 5) Gamepad.press(12); // Order: up+left+right
-        if (encoded_type == 1) Gamepad.press(13); // Reset: all 4
-        if (encoded_type == 2) Gamepad.press(14); // Menu: up+down
-        if (encoded_type == 6) Gamepad.press(15); // #: up+down+left
-        if (encoded_type == 4) Gamepad.press(16); // Select: up+down+right
-        if (encoded_type == 3) Gamepad.press(17); // *: left+right
-
-        Gamepad.xAxis(0);
-        Gamepad.yAxis(0);
-        Gamepad.zAxis(0);
-        Gamepad.rxAxis(0);
-        Gamepad.ryAxis(0);
-        Gamepad.rzAxis(0);
+        if (encoded_type == 5) buttons |= (1 << 11); // Order
+        if (encoded_type == 1) buttons |= (1 << 12); // Reset
+        if (encoded_type == 2) buttons |= (1 << 13); // Menu
+        if (encoded_type == 6) buttons |= (1 << 14); // #
+        if (encoded_type == 4) buttons |= (1 << 15); // Select
+        if (encoded_type == 3) buttons |= (1 << 16); // *
 
         if (device == DEVICE_LN_N64) {
-          if (!((buttons2 >> 3) & 0x01)) Gamepad.press(9);
-          if (!((buttons2 >> 2) & 0x01)) Gamepad.press(4);
-          if (!((buttons2 >> 1) & 0x01)) Gamepad.press(3);
-          if (!((buttons2 >> 0) & 0x01)) Gamepad.press(10);
-          
+          if (!((buttons2 >> 3) & 0x01)) buttons |= (1 << 2); // L
+          if (!((buttons2 >> 2) & 0x01)) buttons |= (1 << 3); // R
+          if (!((buttons2 >> 1) & 0x01)) buttons |= (1 << 8); // C-Left
+          if (!((buttons2 >> 0) & 0x01)) buttons |= (1 << 9); // C-Right
           // N64: signed int8_t, range -128..127
-          Gamepad.xAxis(x_axis * 256);
-          Gamepad.yAxis(y_axis * -256);
+          int16_t x = x_axis * 256;
+          int16_t y = y_axis * -256;
+          report[4] = x & 0xFF;
+          report[5] = (x >> 8) & 0xFF;
+          report[6] = y & 0xFF;
+          report[7] = (y >> 8) & 0xFF;
         }
         if (device == DEVICE_LN_GC) {
-          if (!((buttons2 >> 3) & 0x01)) Gamepad.press(3);
-          if (!((buttons2 >> 2) & 0x01)) Gamepad.press(4);
-
+          if (!((buttons2 >> 3) & 0x01)) buttons |= (1 << 2); // X
+          if (!((buttons2 >> 2) & 0x01)) buttons |= (1 << 3); // Y
           // GC: unsigned uint8_t, range 0..255, convert to signed
-          Gamepad.xAxis(((int16_t)x_axis1 - 128) * 256);
-          Gamepad.yAxis(((int16_t)y_axis1 - 128) * -256);
-
-          Gamepad.rxAxis(((int16_t)x_axis2 - 128) * 256);
-          Gamepad.ryAxis(((int16_t)y_axis2 - 128) * -256);
-
-          Gamepad.zAxis(((int16_t)l_trigger - 128));
-          Gamepad.rzAxis(((int16_t)r_trigger - 128));
+          int16_t x = ((int16_t)x_axis1 - 128) * 256;
+          int16_t y = ((int16_t)y_axis1 - 128) * -256;
+          int16_t rx = ((int16_t)x_axis2 - 128) * 256;
+          int16_t ry = ((int16_t)y_axis2 - 128) * -256;
+          int16_t z = ((int16_t)l_trigger - 128);
+          int16_t rz = ((int16_t)r_trigger - 128);
+          report[4] = x & 0xFF;
+          report[5] = (x >> 8) & 0xFF;
+          report[6] = y & 0xFF;
+          report[7] = (y >> 8) & 0xFF;
+          report[8] = rx & 0xFF;
+          report[9] = (rx >> 8) & 0xFF;
+          report[10] = ry & 0xFF;
+          report[11] = (ry >> 8) & 0xFF;
+          report[12] = z & 0xFF;
+          report[13] = (z >> 8) & 0xFF;
+          report[14] = rz & 0xFF;
         }
-
-        Gamepad.write();
+        // Buttons: 17 bits, little-endian
+        report[1] = buttons & 0xFF;
+        report[2] = (buttons >> 8) & 0xFF;
+        report[3] = (buttons >> 16) & 0xFF;
+        USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
 
         delay(65);
       }
