@@ -52,6 +52,7 @@ static uint8_t good_reads = 0;
 
 
 
+
 const uint8_t customHIDReportDescriptor[] PROGMEM = {
 // Gamepad Input Report (Report ID 1)
 0x05, 0x01,        // Usage Page (Generic Desktop)
@@ -66,8 +67,19 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
   0x95, 0x11,      //   Report Count (17)
   0x75, 0x01,      //   Report Size (1)
   0x81, 0x02,      //   Input (Data,Var,Abs)
+  // Dpad (Hat) in upper nibble of 3rd button byte, pad to byte boundary
+  0x05, 0x01,      //   Usage Page (Generic Desktop)
+  0x09, 0x39,      //   Usage (Hat switch)
+  0x15, 0x00,      //   Logical Minimum (0)
+  0x25, 0x07,      //   Logical Maximum (7)
+  0x35, 0x00,      //   Physical Minimum (0)
+  0x46, 0x3B, 0x01,//   Physical Maximum (315)
+  0x65, 0x14,      //   Unit (Eng Rot:Angular Pos)
+  0x75, 0x04,      //   Report Size (4)
   0x95, 0x01,      //   Report Count (1)
-  0x75, 0x07,      //   Report Size (7) - padding
+  0x81, 0x42,      //   Input (Data,Var,Abs,Null)
+  0x75, 0x03,      //   Report Size (3) - padding
+  0x95, 0x01,      //   Report Count (1)
   0x81, 0x03,      //   Input (Const,Var,Abs)
   // Axes
   0x05, 0x01,      //   Usage Page (Generic Desktop)
@@ -312,13 +324,13 @@ void setup() {
     delay(500);
   }
 
-  //Serial.println(F("LodgeNet USB test host starting..."));
+  Serial.println(F("LodgeNet USB test host starting..."));
 
   DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
   clk1_high();
   clk2_high();
 
-  //Serial.println(F("LodgeNet USB test host starting..."));
+  Serial.println(F("LodgeNet USB test host starting..."));
 }
 
 void loop() {
@@ -337,7 +349,7 @@ void loop() {
       memset(report, 0, sizeof(report));
       MyCustomHID.sendReport(report, sizeof(report));
 
-      //Serial.println("No SR controller detected checking for MCU next.");
+      Serial.println("No SR controller detected checking for MCU next.");
 
       delay(1000); // wait before next read
       break;
@@ -367,7 +379,7 @@ void loop() {
           last_menu = 0;
           good_reads = 0;
 
-          //Serial.println("No SR controller detected checking for MCU next.");
+          Serial.println("No SR controller detected checking for MCU next.");
           // No controller present, skip processing
           delay(60); // wait before next read
           break;
@@ -402,47 +414,66 @@ void loop() {
         }
         last_dpad = dpad;
 
-        //Serial.print("SNES");
-        //Serial.print("   Menu: "        + String(((value >> 15) & 0x01) ? 0 : 1));
-        //Serial.print("   Reset/Order: " + String(((value >> 14) & 0x01) ? 0 : 1));
-        //Serial.print("   -: "           + String(ButtonMinus ? 1 : 0));
-        //Serial.print("   +: "           + String(ButtonPlus  ? 1 : 0));
-        //Serial.print("   B: "           + String(((value >> 13) & 0x01) ? 0 : 1));
-        //Serial.print("   Y: "           + String(((value >> 12) & 0x01) ? 0 : 1));
-        //Serial.print("   Select: "      + String(((value >> 11) & 0x01) ? 0 : 1));
-        //Serial.print("   Start/*: "     + String(((value >> 10) & 0x01) ? 0 : 1));
-        //Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-        //Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-        //Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-        //Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-        //Serial.print("   A: "           + String(((value >>  3) & 0x01) ? 0 : 1));
-        //Serial.print("   X: "           + String(((value >>  2) & 0x01) ? 0 : 1));
-        //Serial.print("   L: "           + String(((value >>  1) & 0x01) ? 0 : 1));
-        //Serial.print("   R: "           + String(((value >>  0) & 0x01) ? 0 : 1));
-        //Serial.println();
+        Serial.print("SNES");
+        Serial.print("   Menu: "        + String(((value >> 15) & 0x01) ? 0 : 1));
+        Serial.print("   Reset/Order: " + String(((value >> 14) & 0x01) ? 0 : 1));
+        Serial.print("   -: "           + String(ButtonMinus ? 1 : 0));
+        Serial.print("   +: "           + String(ButtonPlus  ? 1 : 0));
+        Serial.print("   B: "           + String(((value >> 13) & 0x01) ? 0 : 1));
+        Serial.print("   Y: "           + String(((value >> 12) & 0x01) ? 0 : 1));
+        Serial.print("   Select: "      + String(((value >> 11) & 0x01) ? 0 : 1));
+        Serial.print("   Start/*: "     + String(((value >> 10) & 0x01) ? 0 : 1));
+        Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
+        Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
+        Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
+        Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
+        Serial.print("   A: "           + String(((value >>  3) & 0x01) ? 0 : 1));
+        Serial.print("   X: "           + String(((value >>  2) & 0x01) ? 0 : 1));
+        Serial.print("   L: "           + String(((value >>  1) & 0x01) ? 0 : 1));
+        Serial.print("   R: "           + String(((value >>  0) & 0x01) ? 0 : 1));
+        Serial.println();
 
         // Build and send custom gamepad report
         memset(report, 0, sizeof(report));
         report[0] = 0x01; // Report ID 1
         uint32_t buttons = 0;
         // Map SNES buttons to report bits
-        if (!((value >> 13) & 0x01)) buttons |= (1 << 0);  // B
-        if (!((value >>  3) & 0x01)) buttons |= (1 << 1);  // Y
-        if (!((value >> 12) & 0x01)) buttons |= (1 << 2);  // Select
-        if (!((value >>  2) & 0x01)) buttons |= (1 << 3);  // Start
-        if (!((value >> 11) & 0x01)) buttons |= (1 << 4);  // Up
-        if (!((value >> 10) & 0x01)) buttons |= (1 << 5);  // Down
-        if (!((value >>  1) & 0x01)) buttons |= (1 << 6);  // Left
-        if (!((value >>  0) & 0x01)) buttons |= (1 << 7);  // Right
-        if (!((value >> 14) & 0x01)) buttons |= (1 << 11); // L
-        if (ButtonPlus) buttons |= (1 << 13);              // Plus
-        if (!((value >> 15) & 0x01)) buttons |= (1 << 14); // R
-        if (ButtonMinus) buttons |= (1 << 16);             // Minus
+        if (!((value >> 13) & 0x01)) buttons |= 0x00000001; // B
+        if (!((value >>  3) & 0x01)) buttons |= 0x00000002; // A
+        if (!((value >> 12) & 0x01)) buttons |= 0x00000004; // Y
+        if (!((value >>  2) & 0x01)) buttons |= 0x00000008; // X
+        if (!((value >> 11) & 0x01)) buttons |= 0x00000010; // Select
+        if (!((value >> 10) & 0x01)) buttons |= 0x00000020; // Start/*
+        if (!((value >>  1) & 0x01)) buttons |= 0x00000040; // L
+        if (!((value >>  0) & 0x01)) buttons |= 0x00000080; // R
+        if (!((value >> 14) & 0x01)) buttons |= 0x00000800; // Reset/Order
+        if (ButtonPlus)              buttons |= 0x00002000; // Plus
+        if (!((value >> 15) & 0x01)) buttons |= 0x00004000; // Menu
+        if (ButtonMinus)             buttons |= 0x00010000; // Minus
+
+
         // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+        // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
+        uint8_t hid_hat = 8;
+        switch (last_dpad) {
+          case 0x08: hid_hat = 0; break; // Up
+          case 0x09: hid_hat = 1; break; // Up-Right
+          case 0x01: hid_hat = 2; break; // Right
+          case 0x05: hid_hat = 3; break; // Down-Right
+          case 0x04: hid_hat = 4; break; // Down
+          case 0x06: hid_hat = 5; break; // Down-Left
+          case 0x02: hid_hat = 6; break; // Left
+          case 0x0A: hid_hat = 7; break; // Up-Left
+          default:   hid_hat = 8; break; // Centered/neutral
+        }
+
+        // Pack 17 button bits and dpad (hat) into 3 bytes, pad upper 3 bits
+        report[1] = buttons & 0xFF;            // buttons 0-7
+        report[2] = (buttons >> 8) & 0xFF;     // buttons 8-15
+        report[3] = ((buttons >> 16) & 0x01)   // button 16 (bit 0)
+              | ((hid_hat & 0x0F) << 1) // dpad (bits 1-4)
+              | (0x07 << 5);            // pad bits 5-7 set to 1 (or 0 if you prefer)
         // Axes: all zero for SNES
-        report[1] = buttons & 0xFF;
-        report[2] = (buttons >> 8) & 0xFF;
-        report[3] = (buttons >> 16) & 0xFF;
         for (int i = 0; i < 6; ++i) {
           report[4 + i * 2] = 0x00;
           report[5 + i * 2] = 0x00;
@@ -473,7 +504,7 @@ void loop() {
           last_dpad = 0;
           last_menu = 0;
           good_reads = 0;
-          //Serial.println("No MCU controller detected checking for NONE next.");
+          Serial.println("No MCU controller detected checking for NONE next.");
           delay(65); // wait before next read
           break;
         }
@@ -486,7 +517,7 @@ void loop() {
           last_dpad = 0;
           last_menu = 0;
           good_reads = 0;
-          //Serial.println("No MCU controller detected checking for NONE next.");
+          Serial.println("No MCU controller detected checking for NONE next.");
           delay(65); // wait before next read
           break;
         }
@@ -554,26 +585,26 @@ void loop() {
         //    break;
         //}
         //print_bits_array(&buttons1);
-        //Serial.print(" ");
+        Serial.print(" ");
         //print_bits_array(&buttons2);
 
-        //Serial.print("   Reset: "       + String((encoded_type == 1) ? 1 : 0)); // Reset: all 4
-        //Serial.print("   Menu: "        + String((encoded_type == 2) ? 1 : 0)); // Menu: up+down
-        //Serial.print("   *: "           + String((encoded_type == 3) ? 1 : 0)); // *: left+right
-        //Serial.print("   Select: "      + String((encoded_type == 4) ? 1 : 0)); // Select: up+down+right
-        //Serial.print("   Order: "       + String((encoded_type == 5) ? 1 : 0)); // Order: up+left+right
-        //Serial.print("   #: "           + String((encoded_type == 6) ? 1 : 0)); // #: up+down+left
+        Serial.print("   Reset: "       + String((encoded_type == 1) ? 1 : 0)); // Reset: all 4
+        Serial.print("   Menu: "        + String((encoded_type == 2) ? 1 : 0)); // Menu: up+down
+        Serial.print("   *: "           + String((encoded_type == 3) ? 1 : 0)); // *: left+right
+        Serial.print("   Select: "      + String((encoded_type == 4) ? 1 : 0)); // Select: up+down+right
+        Serial.print("   Order: "       + String((encoded_type == 5) ? 1 : 0)); // Order: up+left+right
+        Serial.print("   #: "           + String((encoded_type == 6) ? 1 : 0)); // #: up+down+left
 //
-        //Serial.print("   A: "           + String(((buttons1 >> 7) & 0x01) ? 0 : 1));
-        //Serial.print("   B: "           + String(((buttons1 >> 6) & 0x01) ? 0 : 1));
-        //Serial.print("   Z: "           + String(((buttons1 >> 5) & 0x01) ? 0 : 1));
-        //Serial.print("   Start: "       + String(((buttons1 >> 4) & 0x01) ? 0 : 1));
-        //Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-        //Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-        //Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-        //Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-        //Serial.print("   L: "           + String(((buttons2 >> 5) & 0x01) ? 0 : 1));
-        //Serial.print("   R: "           + String(((buttons2 >> 4) & 0x01) ? 0 : 1));
+        Serial.print("   A: "           + String(((buttons1 >> 7) & 0x01) ? 0 : 1));
+        Serial.print("   B: "           + String(((buttons1 >> 6) & 0x01) ? 0 : 1));
+        Serial.print("   Z: "           + String(((buttons1 >> 5) & 0x01) ? 0 : 1));
+        Serial.print("   Start: "       + String(((buttons1 >> 4) & 0x01) ? 0 : 1));
+        Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
+        Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
+        Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
+        Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
+        Serial.print("   L: "           + String(((buttons2 >> 5) & 0x01) ? 0 : 1));
+        Serial.print("   R: "           + String(((buttons2 >> 4) & 0x01) ? 0 : 1));
         //
         //switch(device){
         //  case DEVICE_LN_N64:
@@ -587,6 +618,22 @@ void loop() {
         //    Serial.print("   Z: "           + String(((buttons2 >> 2) & 0x01) ? 0 : 1));
         //    break;
         //}
+
+
+        // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+        // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
+        uint8_t hid_hat = 8;
+        switch (last_dpad) {
+          case 0x08: hid_hat = 0; break; // Up
+          case 0x09: hid_hat = 1; break; // Up-Right
+          case 0x01: hid_hat = 2; break; // Right
+          case 0x05: hid_hat = 3; break; // Down-Right
+          case 0x04: hid_hat = 4; break; // Down
+          case 0x06: hid_hat = 5; break; // Down-Left
+          case 0x02: hid_hat = 6; break; // Left
+          case 0x0A: hid_hat = 7; break; // Up-Left
+          default:   hid_hat = 8; break; // Centered/neutral
+        }
 
         // Build and send custom gamepad report for MCU devices
         memset(report, 0, sizeof(report));
@@ -607,12 +654,12 @@ void loop() {
         if (encoded_type == 4) buttons |= (1 << 15); // Select
         if (encoded_type == 3) buttons |= (1 << 16); // *
 
-        //char buf[6];
+        char buf[6];
         if (device == DEVICE_LN_N64) {
-          //sprintf(buf, "%4d", x_axis);
-          //Serial.print(" X: "); Serial.print(buf);
-          //sprintf(buf, "%4d", y_axis);
-          //Serial.print(" Y: "); Serial.print(buf);
+          sprintf(buf, "%4d", x_axis);
+          Serial.print(" X: "); Serial.print(buf);
+          sprintf(buf, "%4d", y_axis);
+          Serial.print(" Y: "); Serial.print(buf);
 
           if (!((buttons2 >> 3) & 0x01)) buttons |= (1 << 2); // L
           if (!((buttons2 >> 2) & 0x01)) buttons |= (1 << 3); // R
@@ -621,26 +668,34 @@ void loop() {
           // N64: signed int8_t, range -128..127
           int16_t x = x_axis * 256;
           int16_t y = y_axis * -256;
+          report[1] = buttons & 0xFF;
+          report[2] = (buttons >> 8) & 0xFF;
+          report[3] = ((buttons >> 16) & 0x01) | ((hid_hat & 0x0F) << 1) | (0x07 << 5);
           report[4] = x & 0xFF;
           report[5] = (x >> 8) & 0xFF;
           report[6] = y & 0xFF;
           report[7] = (y >> 8) & 0xFF;
+          // N64 only uses X/Y axes, rest zero
+          for (int i = 2; i < 6; ++i) {
+            report[4 + i * 2] = 0x00;
+            report[5 + i * 2] = 0x00;
+          }
         }
         if (device == DEVICE_LN_GC) {
-          //sprintf(buf, "%3d", x_axis1);
-          //Serial.print(" X1: "); Serial.print(buf);
-          //sprintf(buf, "%3d", y_axis1);
-          //Serial.print(" Y1: "); Serial.print(buf);
+          sprintf(buf, "%3d", x_axis1);
+          Serial.print(" X1: "); Serial.print(buf);
+          sprintf(buf, "%3d", y_axis1);
+          Serial.print(" Y1: "); Serial.print(buf);
 //
-          //sprintf(buf, "%3d", x_axis2);
-          //Serial.print(" X2: "); Serial.print(buf);
-          //sprintf(buf, "%3d", y_axis2);
-          //Serial.print(" Y2: "); Serial.print(buf);
+          sprintf(buf, "%3d", x_axis2);
+          Serial.print(" X2: "); Serial.print(buf);
+          sprintf(buf, "%3d", y_axis2);
+          Serial.print(" Y2: "); Serial.print(buf);
           //
-          //sprintf(buf, "%3d", l_trigger);
-          //Serial.print(" L: "); Serial.print(buf);
-          //sprintf(buf, "%3d", r_trigger);
-          //Serial.print(" R: "); Serial.print(buf);
+          sprintf(buf, "%3d", l_trigger);
+          Serial.print(" L: "); Serial.print(buf);
+          sprintf(buf, "%3d", r_trigger);
+          Serial.print(" R: "); Serial.print(buf);
 
           if (!((buttons2 >> 3) & 0x01)) buttons |= (1 << 2); // X
           if (!((buttons2 >> 2) & 0x01)) buttons |= (1 << 3); // Y
@@ -651,6 +706,9 @@ void loop() {
           int16_t ry = ((int16_t)y_axis2 - 128) * -256;
           int16_t z = ((int16_t)l_trigger - 128);
           int16_t rz = ((int16_t)r_trigger - 128);
+          report[1] = buttons & 0xFF;
+          report[2] = (buttons >> 8) & 0xFF;
+          report[3] = ((buttons >> 16) & 0x01) | ((hid_hat & 0x0F) << 1) | (0x07 << 5);
           report[4] = x & 0xFF;
           report[5] = (x >> 8) & 0xFF;
           report[6] = y & 0xFF;
@@ -662,14 +720,11 @@ void loop() {
           report[12] = z & 0xFF;
           report[13] = (z >> 8) & 0xFF;
           report[14] = rz & 0xFF;
+          report[15] = 0x00;
         }
-        // Buttons: 17 bits, little-endian
-        report[1] = buttons & 0xFF;
-        report[2] = (buttons >> 8) & 0xFF;
-        report[3] = (buttons >> 16) & 0xFF;
         MyCustomHID.sendReport(report, sizeof(report));
 
-        //Serial.println();
+        Serial.println();
 
         delay(65);
       }
