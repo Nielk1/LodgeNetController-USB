@@ -194,6 +194,17 @@ public:
 
   uint8_t getEndpoint() const { return _endpointIn; }
 
+  // NEW: safe send wrapper
+  int sendReport(const void* data, int len) {
+    // Don't try to send before the host has configured USB
+    if (!USBDevice.configured()) {
+      return -1;
+    }
+    // Mirror Arduino's HID_::SendReport pattern: send whole report on our endpoint
+    // with TRANSFER_RELEASE so the buffer is released when done.
+    return USB_Send(_endpointIn | TRANSFER_RELEASE, data, len);
+  }
+
 private:
   uint8_t epType[1];
   uint8_t _endpointIn;
@@ -290,7 +301,16 @@ void EmitActiveController() {
 }
 
 void setup() {
-  //Serial.begin(115200);
+  Serial.begin(115200);
+
+  // Optional: wait up to 2 seconds for a host to grab the port
+  unsigned long start = millis();
+  while (!Serial && (millis() - start < 2000)) {
+    digitalWrite(17, HIGH);
+    delay(500);
+    digitalWrite(17, LOW);
+    delay(500);
+  }
 
   DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
   clk1_high();
@@ -300,6 +320,7 @@ void setup() {
 }
 
 void loop() {
+  static uint8_t report[16] = {0};
   switch(proto)
   {
     case MODE_LN_NONE:
@@ -311,18 +332,8 @@ void loop() {
       EmitActiveController();
 
       // Send neutral gamepad report (all released, axes centered)
-      uint8_t report[16] = {0};
-      report[0] = 0x01; // Report ID 1
-      // Buttons: 17 bits, little-endian
-      report[1] = 0x00;
-      report[2] = 0x00;
-      report[3] = 0x00;
-      // Axes: 6 x int16_t, all zero (centered)
-      for (int i = 0; i < 6; ++i) {
-        report[4 + i * 2] = 0x00;
-        report[5 + i * 2] = 0x00;
-      }
-      USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
+      memset(report, 0, sizeof(report));
+      MyCustomHID.sendReport(report, sizeof(report));
 
       delay(1000); // wait before next read
       break;
@@ -387,7 +398,7 @@ void loop() {
         last_dpad = dpad;
 
         // Build and send custom gamepad report
-        uint8_t report[16] = {0};
+        memset(report, 0, sizeof(report));
         report[0] = 0x01; // Report ID 1
         uint32_t buttons = 0;
         // Map SNES buttons to report bits
@@ -412,7 +423,7 @@ void loop() {
           report[4 + i * 2] = 0x00;
           report[5 + i * 2] = 0x00;
         }
-        USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
+        MyCustomHID.sendReport(report, sizeof(report));
 
         delay(65); // wait before next read
       }
@@ -511,7 +522,7 @@ void loop() {
 
 
         // Build and send custom gamepad report for MCU devices
-        uint8_t report[16] = {0};
+        memset(report, 0, sizeof(report));
         report[0] = 0x01; // Report ID 1
         uint32_t buttons = 0;
         // Map buttons for N64/GC
@@ -568,7 +579,7 @@ void loop() {
         report[1] = buttons & 0xFF;
         report[2] = (buttons >> 8) & 0xFF;
         report[3] = (buttons >> 16) & 0xFF;
-        USB_Send(MyCustomHID.getEndpoint(), report, sizeof(report));
+        MyCustomHID.sendReport(report, sizeof(report));
 
         delay(65);
       }
