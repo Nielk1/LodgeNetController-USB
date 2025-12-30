@@ -143,7 +143,7 @@ public:
         0x05,                             // dtype = ENDPOINT
         USB_ENDPOINT_IN(_endpointIn),     // addr = IN | endpoint number
         0x03,                             // attr = Interrupt
-        0x000F,                           // packetSize = 15 bytes
+        0x0010,                           // packetSize = 16 bytes
         0x0A                              // interval = 10 ms
       }
     };
@@ -290,13 +290,13 @@ void EmitActiveController() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
   DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
   clk1_high();
   clk2_high();
 
-  Serial.println(F("LodgeNet USB test host starting..."));
+  //Serial.println(F("LodgeNet USB test host starting..."));
 }
 
 void loop() {
@@ -311,7 +311,7 @@ void loop() {
       EmitActiveController();
 
       // Send neutral gamepad report (all released, axes centered)
-      uint8_t report[15] = {0};
+      uint8_t report[16] = {0};
       report[0] = 0x01; // Report ID 1
       // Buttons: 17 bits, little-endian
       report[1] = 0x00;
@@ -387,7 +387,7 @@ void loop() {
         last_dpad = dpad;
 
         // Build and send custom gamepad report
-        uint8_t report[15] = {0};
+        uint8_t report[16] = {0};
         report[0] = 0x01; // Report ID 1
         uint32_t buttons = 0;
         // Map SNES buttons to report bits
@@ -511,7 +511,7 @@ void loop() {
 
 
         // Build and send custom gamepad report for MCU devices
-        uint8_t report[15] = {0};
+        uint8_t report[16] = {0};
         report[0] = 0x01; // Report ID 1
         uint32_t buttons = 0;
         // Map buttons for N64/GC
