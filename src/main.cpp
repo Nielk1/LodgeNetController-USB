@@ -37,8 +37,12 @@ const uint8_t D_CLK2 = 1; // [IN] Second Clock, SNES Only
 const uint8_t D_DATA = 4; // [OUT] Data
 
 
+#define MCU_HELLO_PULSE 7
 #define MCU_PULSE_TIME_LOW 4
-#define MCU_PULSE_TIME_HIGH 18
+#define MCU_PULSE_TIME_HIGH 4
+
+#define SR_PULSE_TIME_LOW 3
+#define SR_PULSE_TIME_HIGH 20
 
 // Time-Skew correction for CLK1
 #define TIME_SKEW 0
@@ -280,12 +284,12 @@ inline void pulse_snes() {
     PORTD = portd;
   #endif
 
-  delayMicroseconds(3);
+  delayMicroseconds(SR_PULSE_TIME_LOW + TIME_SKEW);
 
   // bring latch back up
   clk1_high();
 
-  delayMicroseconds(20);
+  delayMicroseconds(SR_PULSE_TIME_HIGH - TIME_SKEW);
 
   // bring CLK2 down
   //clk2_low();
@@ -301,10 +305,10 @@ inline void pulse(unsigned int length) {
 
 /// Send the hello sequence to the MCU protocol
 inline void clock_mpu_hello() {
-  pulse(6);
-  delayMicroseconds(6 - TIME_SKEW);
-  pulse(6);
-  delayMicroseconds(26 - TIME_SKEW);
+  pulse(MCU_HELLO_PULSE);
+  delayMicroseconds(MCU_HELLO_PULSE - TIME_SKEW);
+  pulse(MCU_HELLO_PULSE);
+  delayMicroseconds(20 + MCU_HELLO_PULSE - TIME_SKEW);
 }
 
 /// Read a byte from the MCU protocol
@@ -343,6 +347,8 @@ void setup() {
   DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
   clk1_high();
   clk2_high();
+  // Ensure data pin is input with internal pull-up
+  pinMode(D_DATA, INPUT_PULLUP);
 
   Serial.println(F("LodgeNet USB test host starting..."));
 }
@@ -522,52 +528,47 @@ void loop() {
       break;
     case MODE_LN_MCU:
       {
+        static uint8_t mcu_fail_count = 0;
+        bool mcu_read_success = false;
+        uint8_t buttons1 = 0, buttons2 = 0, type_flag = 0;
+
         noInterrupts();
-
         clock_mpu_hello();
-        
-        uint8_t buttons1 = read_byte_mcu();
-        uint8_t buttons2 = read_byte_mcu();
-        uint8_t type_flag = (buttons2 & B11000000);
-        if (type_flag == B10000000) {
-          device = DEVICE_LN_N64;
-        } else if (type_flag == B11000000) {
-          device = DEVICE_LN_GC;
-        } else {
-          // impossible MCU response, abort and kick back to idle
-          interrupts();
-          proto = MODE_LN_NONE;
-          device = DEVICE_NONE;
-          last_dpad = 0;
-          last_menu = 0;
-          good_reads = 0;
-          // include bits of buttons2 for debugging
-          Serial.print("No MCU controller detected checking for NONE next b");
-          print_bits_array(buttons1);
-          Serial.print(" b");
-          print_bits_array(buttons2);
-          Serial.println();
-          delay(65); // wait before next read
-          break;
+        buttons1 = read_byte_mcu();
+        buttons2 = read_byte_mcu();
+        type_flag = (buttons2 & B11000000);
+        // Check for valid type_flag and not all-high (0xFF)
+        if ((type_flag == B10000000 || type_flag == B11000000) && buttons2 != 0xFF) {
+          mcu_read_success = true;
         }
-        if (buttons2 == 0xFF) {
-          interrupts();
-          // impossible MCU response, abort and kick back to idle
-          // Must be 0xXXXXXX10 for N64 or 0x01XXXX11 for GC
-          proto = MODE_LN_NONE;
-          device = DEVICE_NONE;
-          last_dpad = 0;
-          last_menu = 0;
-          good_reads = 0;
-          Serial.print("No MCU controller detected checking for NONE next b");
-          print_bits_array(buttons1);
-          Serial.print(" b");
-          print_bits_array(buttons2);
-          Serial.println();
-          delay(65); // wait before next read
+        interrupts();
+
+        if (!mcu_read_success) {
+          mcu_fail_count++;
+          //Serial.print("MCU read fail ");
+          //print_bits_array(buttons1);
+          //Serial.print(" ");
+          //print_bits_array(buttons2);
+          //Serial.print(" (fail count: ");
+          //Serial.print(mcu_fail_count);
+          //Serial.println(")");
+          if (mcu_fail_count >= 5) {
+            proto = MODE_LN_NONE;
+            device = DEVICE_NONE;
+            last_dpad = 0;
+            last_menu = 0;
+            good_reads = 0;
+            mcu_fail_count = 0;
+            delay(65); // fallback delay
+          } else {
+            delay(5); // short retry delay for fast polling
+          }
           break;
+        } else {
+          mcu_fail_count = 0;
         }
 
+        // Continue with normal MCU read logic
         uint8_t x_axis1 = read_byte_mcu();
         uint8_t y_axis1 = read_byte_mcu();
         int8_t x_axis = (int8_t)x_axis1;
@@ -576,13 +577,19 @@ void loop() {
         uint8_t y_axis2 = 0;
         uint8_t l_trigger = 0;
         uint8_t r_trigger = 0;
-        if (device == DEVICE_LN_GC)
+        if (type_flag == B11000000) // GC
         {
           x_axis2 = (int8_t)read_byte_mcu();
           y_axis2 = (int8_t)read_byte_mcu();
           l_trigger = read_byte_mcu();
           r_trigger = read_byte_mcu();
         }
+        //read_byte_mcu();
+
+        // extra pulse that seems to help with fucky-wucky GC data
+        //clk1_low();
+        //delayMicroseconds(MCU_PULSE_TIME_LOW + TIME_SKEW);
+        //clk1_high();
 
         interrupts();
 
@@ -612,64 +619,16 @@ void loop() {
             last_menu = 0;
         }
 
-
-
         if (good_reads < GOOD_READS)
         {
           good_reads++;
           if (good_reads == GOOD_READS) {
             EmitActiveController();
           }else{
-            delay(65); // wait before next read
+            delay(5); // fast polling for active controller
             break; // don't count this read
           }
         }
-
-
-
-        //switch(device){
-        //  case DEVICE_LN_N64:
-        //    Serial.print("N64 ");
-        //    break;
-        //  case DEVICE_LN_GC:
-        //    Serial.print("GC  ");
-        //    break;
-        //}
-        ////print_bits_array(&buttons1);
-        //Serial.print(" ");
-        ////print_bits_array(&buttons2);
-//
-        //Serial.print("   Reset: "       + String((encoded_type == 1) ? 1 : 0)); // Reset: all 4
-        //Serial.print("   Menu: "        + String((encoded_type == 2) ? 1 : 0)); // Menu: up+down
-        //Serial.print("   *: "           + String((encoded_type == 3) ? 1 : 0)); // *: left+right
-        //Serial.print("   Select: "      + String((encoded_type == 4) ? 1 : 0)); // Select: up+down+right
-        //Serial.print("   Order: "       + String((encoded_type == 5) ? 1 : 0)); // Order: up+left+right
-        //Serial.print("   #: "           + String((encoded_type == 6) ? 1 : 0)); // #: up+down+left
-////
-        //Serial.print("   A: "           + String(((buttons1 >> 7) & 0x01) ? 0 : 1));
-        //Serial.print("   B: "           + String(((buttons1 >> 6) & 0x01) ? 0 : 1));
-        //Serial.print("   Z: "           + String(((buttons1 >> 5) & 0x01) ? 0 : 1));
-        //Serial.print("   Start: "       + String(((buttons1 >> 4) & 0x01) ? 0 : 1));
-        //Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-        //Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-        //Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-        //Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-        //Serial.print("   L: "           + String(((buttons2 >> 5) & 0x01) ? 0 : 1));
-        //Serial.print("   R: "           + String(((buttons2 >> 4) & 0x01) ? 0 : 1));
-        //
-        //switch(device){
-        //  case DEVICE_LN_N64:
-        //    Serial.print("   C-Up: "        + String(((buttons2 >> 3) & 0x01) ? 0 : 1));
-        //    Serial.print("   C-Down: "      + String(((buttons2 >> 2) & 0x01) ? 0 : 1));
-        //    Serial.print("   C-Left: "      + String(((buttons2 >> 1) & 0x01) ? 0 : 1));
-        //    Serial.print("   C-Right: "     + String(((buttons2 >> 0) & 0x01) ? 0 : 1));
-        //    break;
-        //  case DEVICE_LN_GC:
-        //    Serial.print("   Y: "           + String(((buttons2 >> 3) & 0x01) ? 0 : 1));
-        //    Serial.print("   X: "           + String(((buttons2 >> 2) & 0x01) ? 0 : 1));
-        //    break;
-        //}
-
 
         // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
         // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
@@ -706,12 +665,7 @@ void loop() {
         if (encoded_type == 3) buttons |= 0x00008000; // *
 
         //char buf[6];
-        if (device == DEVICE_LN_N64) {
-          //sprintf(buf, "%4d", x_axis);
-          //Serial.print(" X: "); Serial.print(buf);
-          //sprintf(buf, "%4d", y_axis);
-          //Serial.print(" Y: "); Serial.print(buf);
-
+        if (type_flag == B10000000) { // N64
           if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // C-Up
           if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // C-Down
           if (!((buttons2 >> 1) & 0x01)) buttons |= 0x00000100; // C-Left
@@ -729,22 +683,7 @@ void loop() {
             report[6 + i] = 0x00;
           }
         }
-        if (device == DEVICE_LN_GC) {
-          //sprintf(buf, "%3d", x_axis1);
-          //Serial.print(" X1: "); Serial.print(buf);
-          //sprintf(buf, "%3d", y_axis1);
-          //Serial.print(" Y1: "); Serial.print(buf);
-//
-          //sprintf(buf, "%3d", x_axis2);
-          //Serial.print(" X2: "); Serial.print(buf);
-          //sprintf(buf, "%3d", y_axis2);
-          //Serial.print(" Y2: "); Serial.print(buf);
-          ////
-          //sprintf(buf, "%3d", l_trigger);
-          //Serial.print(" L: "); Serial.print(buf);
-          //sprintf(buf, "%3d", r_trigger);
-          //Serial.print(" R: "); Serial.print(buf);
-
+        if (type_flag == B11000000) { // GC
           if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // X
           if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // Y
           // GC: unsigned uint8_t, range 0..255, convert to signed
@@ -764,8 +703,6 @@ void loop() {
         }
         MyCustomHID.sendReport(report, sizeof(report));
 
-        //Serial.println();
-
         Serial.print("MCU ");
         for(int i=0;i<sizeof(report);i++) {
           Serial.print(" ");
@@ -773,7 +710,7 @@ void loop() {
         }
         Serial.println();
 
-        delay(65);
+        delay(5); // fast polling for active controller
       }
       break;
   }
