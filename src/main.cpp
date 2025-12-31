@@ -66,13 +66,12 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
   0x85, 0x01,      //   Report ID (1)
   0x05, 0x09,      //   Usage Page (Button)
   0x19, 0x01,      //   Usage Minimum (Button 1)
-  0x29, 0x11,      //   Usage Maximum (Button 17)
+  0x29, 0x10,      //   Usage Maximum (Button 16)
   0x15, 0x00,      //   Logical Minimum (0)
   0x25, 0x01,      //   Logical Maximum (1)
-  0x95, 0x11,      //   Report Count (17)
+  0x95, 0x10,      //   Report Count (16)
   0x75, 0x01,      //   Report Size (1)
   0x81, 0x02,      //   Input (Data,Var,Abs)
-  // Dpad (Hat) in upper nibble of 3rd button byte, pad to byte boundary
   0x05, 0x01,      //   Usage Page (Generic Desktop)
   0x09, 0x39,      //   Usage (Hat switch)
   0x15, 0x00,      //   Logical Minimum (0)
@@ -82,21 +81,23 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
   0x65, 0x14,      //   Unit (Eng Rot:Angular Pos)
   0x75, 0x04,      //   Report Size (4)
   0x95, 0x01,      //   Report Count (1)
-  0x81, 0x42,      //   Input (Data,Var,Abs,Null)
-  0x75, 0x03,      //   Report Size (3) - padding
+  0x81, 0x02,      //   Input (Data,Var,Abs)
+  0x75, 0x04,      //   Report Size (4)
   0x95, 0x01,      //   Report Count (1)
-  0x81, 0x03,      //   Input (Const,Var,Abs)
+  0x81, 0x03,      //   Input (Const,Var,Abs) // padding to next byte
   // Axes
   0x05, 0x01,      //   Usage Page (Generic Desktop)
   0x09, 0x30,      //   Usage (X)
   0x09, 0x31,      //   Usage (Y)
-  0x09, 0x32,      //   Usage (Z)
   0x09, 0x33,      //   Usage (Rx)
   0x09, 0x34,      //   Usage (Ry)
+  0x15, 0x80,      //   Logical Minimum (-128)
+  0x25, 0x7F,      //   Logical Maximum (127)
+  0x09, 0x32,      //   Usage (Z)
   0x09, 0x35,      //   Usage (Rz)
-  0x16, 0x00, 0x80,//   Logical Minimum (-32768)
-  0x26, 0xFF, 0x7F,//   Logical Maximum (32767)
-  0x75, 0x10,      //   Report Size (16)
+  0x15, 0x00,      //   Logical Minimum (0)
+  0x25, 0xFF,      //   Logical Maximum (255)
+  0x75, 0x08,      //   Report Size (8)
   0x95, 0x06,      //   Report Count (6)
   0x81, 0x02,      //   Input (Data,Var,Abs)
 // End Gamepad
@@ -347,7 +348,7 @@ void setup() {
 }
 
 void loop() {
-  static uint8_t report[16] = {0};
+  static uint8_t report[10] = {0};
   switch(proto)
   {
     case MODE_LN_NONE:
@@ -362,8 +363,15 @@ void loop() {
       memset(report, 0, sizeof(report));
 
       report[0] = 0x01; // Report ID 1
-      report[3] = 0x08 << 1; // Dpad centered (0x08)
-
+      // Buttons: 16 bits (2 bytes)
+      report[1] = 0x00;
+      report[2] = 0x00;
+      // Hat: 4 bits, 4 bits padding (centered = 8)
+      report[3] = 0x08;
+      // Axes: all zero for SNES
+      for (int i = 0; i < 6; ++i) {
+        report[4 + i] = 0x00;
+      }
       MyCustomHID.sendReport(report, sizeof(report));
 
       Serial.print("NONE");
@@ -460,20 +468,20 @@ void loop() {
         // Build and send custom gamepad report
         memset(report, 0, sizeof(report));
         report[0] = 0x01; // Report ID 1
-        uint32_t buttons = 0;
+        uint16_t buttons = 0;
         // Map SNES buttons to report bits
-        if (!((value >> 13) & 0x01)) buttons |= 0x00000001; // B
-        if (!((value >>  3) & 0x01)) buttons |= 0x00000002; // A
-        if (!((value >> 12) & 0x01)) buttons |= 0x00000004; // Y
-        if (!((value >>  2) & 0x01)) buttons |= 0x00000008; // X
-        if (!((value >> 11) & 0x01)) buttons |= 0x00000010; // Select
-        if (!((value >> 10) & 0x01)) buttons |= 0x00000020; // Start/*
-        if (!((value >>  1) & 0x01)) buttons |= 0x00000040; // L
-        if (!((value >>  0) & 0x01)) buttons |= 0x00000080; // R
-        if (!((value >> 14) & 0x01)) buttons |= 0x00000800; // Reset/Order
-        if (ButtonPlus)              buttons |= 0x00002000; // Plus
-        if (!((value >> 15) & 0x01)) buttons |= 0x00004000; // Menu
-        if (ButtonMinus)             buttons |= 0x00010000; // Minus
+        if (!((value >> 13) & 0x01)) buttons |= 0x0001; // B
+        if (!((value >>  3) & 0x01)) buttons |= 0x0002; // A
+        if (!((value >> 12) & 0x01)) buttons |= 0x0004; // Y
+        if (!((value >>  2) & 0x01)) buttons |= 0x0008; // X
+        if (!((value >> 11) & 0x01)) buttons |= 0x0010; // Select
+        if (!((value >> 10) & 0x01)) buttons |= 0x0020; // Start/*
+        if (!((value >>  1) & 0x01)) buttons |= 0x0040; // L
+        if (!((value >>  0) & 0x01)) buttons |= 0x0080; // R
+        if (!((value >> 14) & 0x01)) buttons |= 0x0400; // Reset/Order
+        if (ButtonPlus)              buttons |= 0x1000; // Plus
+        if (!((value >> 15) & 0x01)) buttons |= 0x2000; // Menu
+        if (ButtonMinus)             buttons |= 0x8000; // Minus
 
 
         // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
@@ -491,16 +499,14 @@ void loop() {
           default:   hid_hat = 8; break; // Centered/neutral
         }
 
-        // Pack 17 button bits and dpad (hat) into 3 bytes, pad upper 3 bits
+        // Pack 16 button bits
         report[1] = buttons & 0xFF;            // buttons 0-7
         report[2] = (buttons >> 8) & 0xFF;     // buttons 8-15
-        report[3] = ((buttons >> 16) & 0x01)   // button 16 (bit 0)
-              | ((hid_hat & 0x0F) << 1) // dpad (bits 1-4)
-              | (0x07 << 5);            // pad bits 5-7 set to 1 (or 0 if you prefer)
+        // Hat switch (4 bits), 4 bits padding
+        report[3] = (hid_hat & 0x0F);
         // Axes: all zero for SNES
         for (int i = 0; i < 6; ++i) {
-          report[4 + i * 2] = 0x00;
-          report[5 + i * 2] = 0x00;
+          report[4 + i] = 0x00;
         }
         MyCustomHID.sendReport(report, sizeof(report));
 
@@ -692,12 +698,12 @@ void loop() {
         if (!((buttons2 >> 5) & 0x01)) buttons |= 0x00000040;  // L
         if (!((buttons2 >> 4) & 0x01)) buttons |= 0x00000080;  // R
 
-        if (encoded_type == 5) buttons |= 0x00000800; // Order
-        if (encoded_type == 1) buttons |= 0x00001000; // Reset
-        if (encoded_type == 2) buttons |= 0x00002000; // Menu
-        if (encoded_type == 6) buttons |= 0x00004000; // #
-        if (encoded_type == 4) buttons |= 0x00008000; // Select
-        if (encoded_type == 3) buttons |= 0x00010000; // *
+        if (encoded_type == 5) buttons |= 0x00000400; // Order
+        if (encoded_type == 1) buttons |= 0x00000800; // Reset
+        if (encoded_type == 2) buttons |= 0x00001000; // Menu
+        if (encoded_type == 6) buttons |= 0x00002000; // #
+        if (encoded_type == 4) buttons |= 0x00004000; // Select
+        if (encoded_type == 3) buttons |= 0x00008000; // *
 
         //char buf[6];
         if (device == DEVICE_LN_N64) {
@@ -711,19 +717,16 @@ void loop() {
           if (!((buttons2 >> 1) & 0x01)) buttons |= 0x00000100; // C-Left
           if (!((buttons2 >> 0) & 0x01)) buttons |= 0x00000200; // C-Right
           // N64: signed int8_t, range -128..127
-          int16_t x = x_axis * 256;
-          int16_t y = y_axis * -256;
+          int16_t x = x_axis;
+          int16_t y = y_axis * -1;
           report[1] = buttons & 0xFF;
           report[2] = (buttons >> 8) & 0xFF;
-          report[3] = ((buttons >> 16) & 0x01) | ((hid_hat & 0x0F) << 1) | (0x07 << 5);
+          report[3] = (hid_hat & 0x0F);
           report[4] = x & 0xFF;
-          report[5] = (x >> 8) & 0xFF;
-          report[6] = y & 0xFF;
-          report[7] = (y >> 8) & 0xFF;
+          report[5] = y & 0xFF;
           // N64 only uses X/Y axes, rest zero
-          for (int i = 2; i < 6; ++i) {
-            report[4 + i * 2] = 0x00;
-            report[5 + i * 2] = 0x00;
+          for (int i = 0; i < 4; ++i) {
+            report[6 + i] = 0x00;
           }
         }
         if (device == DEVICE_LN_GC) {
@@ -745,27 +748,19 @@ void loop() {
           if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // X
           if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // Y
           // GC: unsigned uint8_t, range 0..255, convert to signed
-          int16_t x = ((int16_t)x_axis1 - 128) * 256;
-          int16_t y = ((int16_t)y_axis1 - 128) * -256;
-          int16_t rx = ((int16_t)x_axis2 - 128) * 256;
-          int16_t ry = ((int16_t)y_axis2 - 128) * -256;
-          int16_t z = ((int16_t)l_trigger - 128);
-          int16_t rz = ((int16_t)r_trigger - 128);
+          int8_t x = ((int8_t)x_axis1 - 128);
+          int8_t y = ((int8_t)y_axis1 - 128) * -1;
+          int8_t rx = ((int8_t)x_axis2 - 128);
+          int8_t ry = ((int8_t)y_axis2 - 128) * -1;
           report[1] = buttons & 0xFF;
           report[2] = (buttons >> 8) & 0xFF;
-          report[3] = ((buttons >> 16) & 0x01) | ((hid_hat & 0x0F) << 1) | (0x07 << 5);
-          report[4] = x & 0xFF;
-          report[5] = (x >> 8) & 0xFF;
-          report[6] = y & 0xFF;
-          report[7] = (y >> 8) & 0xFF;
-          report[8] = rx & 0xFF;
-          report[9] = (rx >> 8) & 0xFF;
-          report[10] = ry & 0xFF;
-          report[11] = (ry >> 8) & 0xFF;
-          report[12] = z & 0xFF;
-          report[13] = (z >> 8) & 0xFF;
-          report[14] = rz & 0xFF;
-          report[15] = 0x00;
+          report[3] = (hid_hat & 0x0F);
+          report[4] = x;
+          report[5] = y;
+          report[6] = rx;
+          report[7] = ry;
+          report[8] = l_trigger;
+          report[9] = r_trigger;
         }
         MyCustomHID.sendReport(report, sizeof(report));
 
