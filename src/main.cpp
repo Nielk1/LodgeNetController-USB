@@ -536,6 +536,13 @@ void loop() {
         clock_mpu_hello();
         buttons1 = read_byte_mcu();
         buttons2 = read_byte_mcu();
+        uint8_t analog1 = read_byte_mcu();
+        uint8_t analog2 = read_byte_mcu();
+        uint8_t analog3 = read_byte_mcu();
+        uint8_t analog4 = read_byte_mcu();
+        uint8_t analog5 = read_byte_mcu();
+        uint8_t analog6 = read_byte_mcu();
+        uint8_t extra = read_byte_mcu();
         type_flag = (buttons2 & B11000000);
         // Check for valid type_flag and not all-high (0xFF)
         if ((type_flag == B10000000 || type_flag == B11000000) && buttons2 != 0xFF) {
@@ -569,8 +576,8 @@ void loop() {
         }
 
         // Continue with normal MCU read logic
-        uint8_t x_axis1 = read_byte_mcu();
-        uint8_t y_axis1 = read_byte_mcu();
+        uint8_t x_axis1 = analog1;
+        uint8_t y_axis1 = analog2;
         int8_t x_axis = (int8_t)x_axis1;
         int8_t y_axis = (int8_t)y_axis1;
         uint8_t x_axis2 = 0;
@@ -579,10 +586,10 @@ void loop() {
         uint8_t r_trigger = 0;
         if (type_flag == B11000000) // GC
         {
-          x_axis2 = (int8_t)read_byte_mcu();
-          y_axis2 = (int8_t)read_byte_mcu();
-          l_trigger = read_byte_mcu();
-          r_trigger = read_byte_mcu();
+          x_axis2 = (int8_t)analog3;
+          y_axis2 = (int8_t)analog4;
+          l_trigger = analog5;
+          r_trigger = analog6;
         }
         //read_byte_mcu();
 
