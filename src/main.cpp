@@ -17,6 +17,13 @@ const uint8_t D_CLK1 = 0; // [IN] Main Clock, Gate Driver
 const uint8_t D_CLK2 = 1; // [IN] Second Clock, SNES Only
 const uint8_t D_DATA = 4; // [OUT] Data
 
+// bInterval = 1 → host polls every 1 ms → max 1000 reports/s
+// bInterval = 2 → every 2 ms → 500 Hz
+// bInterval = 8 → every 8 ms → 125 Hz
+// bInterval = 10 (0x0A) → every 10 ms → 100 Hz
+//#define USB_HID_INTERVAL 0x0A
+#define USB_HID_INTERVAL 0x02
+
 #define LOG_TO_SERIAL true
 
 #define MCU_HELLO_PULSE 7
@@ -199,7 +206,7 @@ public:
                 USB_ENDPOINT_IN(_endpointIn),
                 0x03,
                 0x0010,
-                0x0A
+                USB_HID_INTERVAL
             }
         };
 
@@ -220,27 +227,27 @@ public:
             return false; // not for us
         }
 
-        //if (setup.bmRequestType == REQUEST_DEVICETOHOST_CLASS_INTERFACE &&
-        //    setup.bRequest      == HID_GET_REPORT &&
-        //    setup.wValueH       == HID_REPORT_TYPE_FEATURE &&
-        //    setup.wValueL       == 2) // Report ID 2
-        //{
-        //    uint8_t buffer[2];
-        //    buffer[0] = 0x02; // Report ID 2
-        //    buffer[1] = (good_reads < GOOD_READS) ? DEVICE_NONE : device;
-        //    USB_SendControl(0, buffer, sizeof(buffer));
-        //    return true;
-        //}
+        if (setup.bmRequestType == REQUEST_DEVICETOHOST_CLASS_INTERFACE &&
+            setup.bRequest      == HID_GET_REPORT &&
+            setup.wValueH       == HID_REPORT_TYPE_FEATURE &&
+            setup.wValueL       == 2) // Report ID 2
+        {
+            uint8_t buffer[2];
+            buffer[0] = 0x02; // Report ID 2
+            buffer[1] = (good_reads < GOOD_READS) ? DEVICE_NONE : device;
+            USB_SendControl(0, buffer, sizeof(buffer));
+            return true;
+        }
 
-        //if (setup.bmRequestType == REQUEST_HOSTTODEVICE_CLASS_INTERFACE &&
-        //    setup.bRequest      == HID_SET_REPORT &&
-        //    setup.wValueH       == HID_REPORT_TYPE_FEATURE &&
-        //    setup.wValueL       == 2)
-        //{
-        //    // Optional: read data if you want to consume host->device feature report
-        //    // uint8_t buf[1]; USB_RecvControl(buf, 1);
-        //    return true;
-        //}
+        if (setup.bmRequestType == REQUEST_HOSTTODEVICE_CLASS_INTERFACE &&
+            setup.bRequest      == HID_SET_REPORT &&
+            setup.wValueH       == HID_REPORT_TYPE_FEATURE &&
+            setup.wValueL       == 2)
+        {
+            // Optional: read data if you want to consume host->device feature report
+            // uint8_t buf[1]; USB_RecvControl(buf, 1);
+            return true;
+        }
 
         return false;
     }
@@ -435,6 +442,7 @@ void setup() {
     DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
     clk1_high();
     clk2_high();
+
     // Ensure data pin is input with internal pull-up
     pinMode(D_DATA, INPUT_PULLUP);
 
@@ -452,15 +460,6 @@ void loop() {
 
             // Send neutral gamepad report (all released, axes centered)
             MyCustomHID.sendState(proto, device, 0x00, 0x00, 0x08, 0,0,0,0,0,0);
-
-            //Serial.print("NONE");
-            //for(int i=0;i<sizeof(report);i++) {
-            //    Serial.print(" ");
-            //    print_bits_array(report[i]);
-            //}
-            //Serial.println();
-
-            //Serial.println("No SR controller detected checking for MCU next.");
 
             delay(1000); // wait before next read
             break;
