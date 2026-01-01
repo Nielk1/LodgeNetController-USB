@@ -128,8 +128,8 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
     0x09, 0x31,      //   Usage (Y)
     0x09, 0x33,      //   Usage (Rx)
     0x09, 0x34,      //   Usage (Ry)
-    0x15, 0x80,      //   Logical Minimum (-128)
-    0x25, 0x7F,      //   Logical Maximum (127)
+    0x15, 0x00,      //   Logical Minimum (0)
+    0x26, 0xFF, 0x00,//   Logical Maximum (255)
     0x75, 0x08,      //   Report Size (8)
     0x95, 0x04,      //   Report Count (4)
     0x81, 0x02,      //   Input (Data,Var,Abs)
@@ -139,7 +139,7 @@ const uint8_t customHIDReportDescriptor[] PROGMEM = {
     0x09, 0x36,      //   Slider (left trigger)
     0x09, 0x36,      //   Slider (right trigger)
     0x15, 0x00,      //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,// Logical Maximum (255)
+    0x26, 0xFF, 0x00,//   Logical Maximum (255)
     0x75, 0x08,      //   Report Size (8)
     0x95, 0x02,      //   Report Count (2)
     0x81, 0x02,      //   Input (Data,Var,Abs)
@@ -265,16 +265,16 @@ public:
         return USB_Send(_endpointIn | TRANSFER_RELEASE, data, len);
     }
 
-    int sendState(ProtocolMode proto, DeviceType device, uint8_t buttons1, uint8_t buttons2, uint8_t hat, int8_t x, int8_t y, int8_t rx, int8_t ry, uint8_t l_trigger, uint8_t r_trigger) {
+    int sendState(ProtocolMode proto, DeviceType device, uint8_t buttons1, uint8_t buttons2, uint8_t hat, uint8_t x, uint8_t y, uint8_t rx, uint8_t ry, uint8_t l_trigger, uint8_t r_trigger) {
         uint8_t report[10];
         report[0] = 0x01; // Report ID 1
         report[1] = buttons1;
         report[2] = buttons2;
         report[3] = (hat & 0x0F) | ((device << 4) & 0x30) | ((proto << 6) & 0xC0);
-        report[4] = (uint8_t)x;
-        report[5] = (uint8_t)y;
-        report[6] = (uint8_t)rx;
-        report[7] = (uint8_t)ry;
+        report[4] = x;
+        report[5] = y;
+        report[6] = rx;
+        report[7] = ry;
         report[8] = l_trigger;
         report[9] = r_trigger;
 
@@ -459,7 +459,7 @@ void loop() {
             good_reads = 0;
 
             // Send neutral gamepad report (all released, axes centered)
-            MyCustomHID.sendState(proto, device, 0x00, 0x00, 0x08, 0,0,0,0,0,0);
+            MyCustomHID.sendState(proto, device, 0x00, 0x00, 0x08, 0x80, 0x80, 0x80, 0x80, 0, 0);
 
             delay(1000); // wait before next read
             break;
@@ -474,7 +474,6 @@ void loop() {
                     clk2_low();
                     delayMicroseconds(20);
                     value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
-                    //clk2_high();
                 }
                 pulse_snes();
                 delayMicroseconds(20);
@@ -489,7 +488,6 @@ void loop() {
                     last_menu = 0;
                     good_reads = 0;
 
-                    Serial.println("No SR controller detected checking for MCU next.");
                     // No controller present, skip processing
                     delay(60); // wait before next read
                     break;
@@ -521,25 +519,6 @@ void loop() {
                 }
                 last_dpad = dpad;
 
-                //Serial.print("SNES");
-                //Serial.print("   Menu: "        + String(((value >> 15) & 0x01) ? 0 : 1));
-                //Serial.print("   Reset/Order: " + String(((value >> 14) & 0x01) ? 0 : 1));
-                //Serial.print("   -: "           + String(ButtonMinus ? 1 : 0));
-                //Serial.print("   +: "           + String(ButtonPlus  ? 1 : 0));
-                //Serial.print("   B: "           + String(((value >> 13) & 0x01) ? 0 : 1));
-                //Serial.print("   Y: "           + String(((value >> 12) & 0x01) ? 0 : 1));
-                //Serial.print("   Select: "      + String(((value >> 11) & 0x01) ? 0 : 1));
-                //Serial.print("   Start/*: "     + String(((value >> 10) & 0x01) ? 0 : 1));
-                //Serial.print("   Up: "          + String((last_dpad & 0x08) ? 1 : 0));
-                //Serial.print("   Down: "        + String((last_dpad & 0x04) ? 1 : 0));
-                //Serial.print("   Left: "        + String((last_dpad & 0x02) ? 1 : 0));
-                //Serial.print("   Right: "       + String((last_dpad & 0x01) ? 1 : 0));
-                //Serial.print("   A: "           + String(((value >>  3) & 0x01) ? 0 : 1));
-                //Serial.print("   X: "           + String(((value >>  2) & 0x01) ? 0 : 1));
-                //Serial.print("   L: "           + String(((value >>  1) & 0x01) ? 0 : 1));
-                //Serial.print("   R: "           + String(((value >>  0) & 0x01) ? 0 : 1));
-                //Serial.println();
-
                 // Build and send custom gamepad report
                 uint16_t buttons = 0;
                 // Map SNES buttons to report bits
@@ -556,7 +535,6 @@ void loop() {
                 if (!((value >> 15) & 0x01)) buttons |= 0x2000; // Menu
                 if (ButtonMinus)             buttons |= 0x8000; // Minus
 
-
                 // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
                 // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
                 uint8_t hid_hat = 8;
@@ -572,7 +550,7 @@ void loop() {
                     default:   hid_hat = 8; break; // Centered/neutral
                 }
 
-                MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, 0,0,0,0,0,0);
+                MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, 0x80, 0x80, 0x80, 0x80, 0, 0);
 
                 delay(65); // wait before next read
             }
@@ -581,7 +559,7 @@ void loop() {
             {
                 static uint8_t mcu_fail_count = 0;
                 bool mcu_read_success = false;
-                uint8_t buttons1 = 0, buttons2 = 0, type_flag = 0;
+                uint8_t buttons1 = 0, buttons2 = 0, type_flag1 = 0, type_flag2 = 0;
 
                 noInterrupts();
                 clock_mpu_hello();
@@ -594,22 +572,17 @@ void loop() {
                 uint8_t analog5 = read_byte_mcu();
                 uint8_t analog6 = read_byte_mcu();
                 uint8_t extra = read_byte_mcu();
-                type_flag = (buttons2 & B11000000);
+                interrupts();
+
+                type_flag1 = (buttons2 & B11000000);
+                type_flag2 = (buttons2 & B11000011);
                 // Check for valid type_flag and not all-high (0xFF)
-                if ((type_flag == B10000000 || type_flag == B11000000) && buttons2 != 0xFF) {
+                if ((type_flag1 == B10000000 || type_flag2 == B11000010) && buttons2 != 0xFF) {
                     mcu_read_success = true;
                 }
-                interrupts();
 
                 if (!mcu_read_success) {
                     mcu_fail_count++;
-                    //Serial.print("MCU read fail ");
-                    //print_bits_array(buttons1);
-                    //Serial.print(" ");
-                    //print_bits_array(buttons2);
-                    //Serial.print(" (fail count: ");
-                    //Serial.print(mcu_fail_count);
-                    //Serial.println(")");
                     if (mcu_fail_count >= 5) {
                         proto = MODE_LN_NONE;
                         device = DEVICE_NONE;
@@ -625,31 +598,6 @@ void loop() {
                 } else {
                     mcu_fail_count = 0;
                 }
-
-                // Continue with normal MCU read logic
-                uint8_t x_axis1 = analog1;
-                uint8_t y_axis1 = analog2;
-                int8_t x_axis = (int8_t)x_axis1;
-                int8_t y_axis = (int8_t)y_axis1;
-                uint8_t x_axis2 = 0;
-                uint8_t y_axis2 = 0;
-                uint8_t l_trigger = 0;
-                uint8_t r_trigger = 0;
-                if (type_flag == B11000000) // GC
-                {
-                    x_axis2 = (int8_t)analog3;
-                    y_axis2 = (int8_t)analog4;
-                    l_trigger = analog5;
-                    r_trigger = analog6;
-                }
-                //read_byte_mcu();
-
-                // extra pulse that seems to help with fucky-wucky GC data
-                //clk1_low();
-                //delayMicroseconds(MCU_PULSE_TIME_LOW + TIME_SKEW);
-                //clk1_high();
-
-                interrupts();
 
                 uint8_t dpad = ~buttons1 & 0x0F; // UDLR bits
                 uint8_t encoded_type = 0;
@@ -718,35 +666,21 @@ void loop() {
                 if (encoded_type == 4) buttons |= 0x00004000; // Select
                 if (encoded_type == 3) buttons |= 0x00008000; // *
 
-                //char buf[6];
-                if (type_flag == B10000000) { // N64
+                if (type_flag1 == B10000000) { // N64
                     if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // C-Up
                     if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // C-Down
                     if (!((buttons2 >> 1) & 0x01)) buttons |= 0x00000100; // C-Left
                     if (!((buttons2 >> 0) & 0x01)) buttons |= 0x00000200; // C-Right
-                    // N64: signed int8_t, range -128..127
-                    int16_t x = x_axis;
-                    int16_t y = y_axis * -1;
+                    // N64: signed int8_t, range -128..127, rescale
                     // N64 only uses X/Y axes, rest zero
-                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, x & 0xFF,y & 0xFF,0x00,0x00,0x00,0x00);
+                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, (uint8_t)(analog1 + 128), (uint8_t)(127 - analog2), 0x80, 0x80, 0x00, 0x00);
                 }
-                if (type_flag == B11000000) { // GC
+                if (type_flag2 == B11000010) { // GC
                     if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // X
                     if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // Y
                     // GC: unsigned uint8_t, range 0..255, convert to signed
-                    int8_t x = ((int8_t)x_axis1 - 128);
-                    int8_t y = ((int8_t)y_axis1 - 128) * -1;
-                    int8_t rx = ((int8_t)x_axis2 - 128);
-                    int8_t ry = ((int8_t)y_axis2 - 128) * -1;
-                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, x, y, rx, ry, l_trigger, r_trigger);
+                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, analog1, 255 - analog2, analog3, 255 - analog4, analog5, analog6);
                 }
-
-                //Serial.print("MCU ");
-                //for(int i=0;i<sizeof(report);i++) {
-                //    Serial.print(" ");
-                //    print_bits_array(report[i]);
-                //}
-                //Serial.println();
 
                 delay(5); // fast polling for active controller
             }
