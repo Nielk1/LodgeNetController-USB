@@ -1,3 +1,5 @@
+// Created by John "Nielk1" Klein
+
 #include <Arduino.h>
 #include "PluggableUSB.h"
 #include "HID.h"
@@ -27,8 +29,11 @@ const uint8_t D_DATA = 4; // [OUT] Data
 #define LOG_TO_SERIAL true
 
 #define MCU_HELLO_PULSE 7
-#define MCU_PULSE_TIME_LOW 4
-#define MCU_PULSE_TIME_HIGH 4
+//#define MCU_PULSE_TIME_LOW 4
+//#define MCU_PULSE_TIME_HIGH 4
+#define MCU_PULSE_TIME_LOW 6 // if this is too low analog reads become unstable
+#define MCU_PULSE_TIME_HIGH 30
+//#define MCU_PULSE_TIME_HIGH 6
 
 #define SR_PULSE_TIME_LOW 3
 #define SR_PULSE_TIME_HIGH 20
@@ -40,7 +45,32 @@ const uint8_t D_DATA = 4; // [OUT] Data
 // PMOS gate logic: P-channel high-side, active LOW (gate LOW = power ON)
 #define PWR_ACTIVE_LOW true
 
-#define GOOD_READS 15
+#define GOOD_READS_SR 15 // number of consecutive good reads to confirm presence
+#define GOOD_READS_MCU 15 // number of consecutive good reads to confirm presence
+#define BAD_READS_MCU 5 // number of consecutive bad reads to confirm failure
+
+
+#define STICK_CENTER 0x80
+
+#define DPAD_UP 0
+#define DPAD_UP_RIGHT 1
+#define DPAD_RIGHT 2
+#define DPAD_DOWN_RIGHT 3
+#define DPAD_DOWN 4
+#define DPAD_DOWN_LEFT 5
+#define DPAD_LEFT 6
+#define DPAD_UP_LEFT 7
+#define DPAD_CENTER 8
+
+#define CLEAR_STATE last_dpad = 0;\
+last_menu = 0;\
+good_reads = 0;\
+mcu_fail_count = 0;
+
+#define SLEEP_NONE delay(1000); // Sleep between polls whe no controller set
+#define SLEEP_SR delay(1); // Sleep between polls when using Shift Register based controller
+#define SLEEP_MCU delay(16); // Sleep between polls when using Microcontroller based controller
+#define SLEEP_BETWEEN_PROTOCOLS delay(1); // Sleep between protocols
 
 
 enum ProtocolMode {
@@ -51,33 +81,97 @@ enum ProtocolMode {
 
 enum DeviceType {
     DEVICE_NONE,
-    DEVICE_LN_GC,
-    DEVICE_LN_N64,
     DEVICE_LN_SNES,
+    DEVICE_LN_N64,
+    DEVICE_LN_GC,
 };
 
 // default protocol
 ProtocolMode proto = MODE_LN_NONE;
-// default device
-DeviceType device = DEVICE_NONE;
 
 static uint8_t last_dpad = 0;
 static uint8_t last_menu = 0;
 static uint8_t good_reads = 0;
+static uint8_t mcu_fail_count = 0;
 
 
 
 
 
-
-
-void print_bits_array(uint8_t value) {
+void print_bits_array(uint16_t value) {
     //for (int i = 7; i >= 0; i--) {
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         Serial.print((value & (1 << i)) ? '1' : '0');
     }
 }
 
+void print_dpad_direction(uint8_t hat) {
+
+    switch (hat) {
+        case 0: Serial.print("↑"); break;
+        case 1: Serial.print("↗"); break;
+        case 2: Serial.print("→"); break;
+        case 3: Serial.print("↘"); break;
+        case 4: Serial.print("↓"); break;
+        case 5: Serial.print("↙"); break;
+        case 6: Serial.print("←"); break;
+        case 7: Serial.print("↖"); break;
+        default: Serial.print("·"); break;
+    }
+    //switch (hat) {
+    //    case 0: Serial.print(" ^ "); break;
+    //    case 1: Serial.print(" /^"); break;
+    //    case 2: Serial.print(" ->"); break;
+    //    case 3: Serial.print(" \\v"); break;
+    //    case 4: Serial.print(" v "); break;
+    //    case 5: Serial.print("v/ "); break;
+    //    case 6: Serial.print("<- "); break;
+    //    case 7: Serial.print("^\\ "); break;
+    //    default: Serial.print(" - "); break;
+    //}
+}
+
+void print_stick_direction(uint8_t x, uint8_t y) {
+    if (x < 85) { // left
+        if (y < 85) { // up
+            Serial.print("↖");
+        } else if (y > 170) { // down
+            Serial.print("↙");
+        } else {
+            Serial.print("←");
+        }
+    } else if (x > 170) { // right
+        if (y < 85) { // up
+            Serial.print("↗");
+        } else if (y > 170) { // down
+            Serial.print("↘");
+        } else {
+            Serial.print("→");
+        }
+    } else { // center x
+        if (y < 85) { // up
+            Serial.print("↑");
+        } else if (y > 170) { // down
+            Serial.print("↓");
+        } else {
+            Serial.print("·");
+        }
+    }
+}
+
+void print_trigger(uint8_t value) {
+    if (value > 200) {
+        Serial.print("█");
+    } else if (value > 150) {
+        Serial.print("▓");
+    } else if (value > 100) {
+        Serial.print("▒");
+    } else if (value > 50) {
+        Serial.print("░");
+    } else {
+        Serial.print("·");
+    }
+}
 
 const uint8_t customHIDReportDescriptor[] PROGMEM = {
 // Gamepad Input Report (Report ID 1)
@@ -234,7 +328,7 @@ public:
         {
             uint8_t buffer[2];
             buffer[0] = 0x02; // Report ID 2
-            buffer[1] = (good_reads < GOOD_READS) ? DEVICE_NONE : device;
+            //buffer[1] = (good_reads < GOOD_READS_SR) ? DEVICE_NONE : device;
             USB_SendControl(0, buffer, sizeof(buffer));
             return true;
         }
@@ -265,11 +359,11 @@ public:
         return USB_Send(_endpointIn | TRANSFER_RELEASE, data, len);
     }
 
-    int sendState(ProtocolMode proto, DeviceType device, uint8_t buttons1, uint8_t buttons2, uint8_t hat, uint8_t x, uint8_t y, uint8_t rx, uint8_t ry, uint8_t l_trigger, uint8_t r_trigger) {
+    int sendState(ProtocolMode proto, DeviceType device, uint16_t buttons, uint8_t hat, uint8_t x, uint8_t y, uint8_t rx, uint8_t ry, uint8_t l_trigger, uint8_t r_trigger) {
         uint8_t report[10];
         report[0] = 0x01; // Report ID 1
-        report[1] = buttons1;
-        report[2] = buttons2;
+        report[1] = buttons & 0xFF;
+        report[2] = (buttons >> 8) & 0xFF;
         report[3] = (hat & 0x0F) | ((device << 4) & 0x30) | ((proto << 6) & 0xC0);
         report[4] = x;
         report[5] = y;
@@ -296,29 +390,24 @@ public:
             default:             Serial.print("UNK  "); break;
         }
 
-        print_bits_array(buttons1);
-        print_bits_array(buttons2);
+        print_bits_array(buttons);
         Serial.print(" ");
-        switch (hat) {
-            case 0: Serial.print(" ^ "); break;
-            case 1: Serial.print(" /^"); break;
-            case 2: Serial.print(" ->"); break;
-            case 3: Serial.print(" \\v"); break;
-            case 4: Serial.print(" v "); break;
-            case 5: Serial.print("v/ "); break;
-            case 6: Serial.print("<- "); break;
-            case 7: Serial.print("^\\ "); break;
-            default: Serial.print(" - "); break;
-        }
+        print_dpad_direction(hat);
 
         static char buf[5];
 
-        Serial.print(" "); snprintf(buf, sizeof(buf), "%4d", x); Serial.print(buf);
-        Serial.print(" "); snprintf(buf, sizeof(buf), "%4d", y); Serial.print(buf);
-        Serial.print(" "); snprintf(buf, sizeof(buf), "%4d", rx); Serial.print(buf);
-        Serial.print(" "); snprintf(buf, sizeof(buf), "%4d", ry); Serial.print(buf);
-        Serial.print(" "); snprintf(buf, sizeof(buf), "%3d", l_trigger); Serial.print(buf);
+        Serial.print("  "); snprintf(buf, sizeof(buf), "%3d", x); Serial.print(buf);
+        Serial.print(" "); snprintf(buf, sizeof(buf), "%3d", y); Serial.print(buf);
+        Serial.print(" "); print_stick_direction(x, y);
+
+        Serial.print("  "); snprintf(buf, sizeof(buf), "%3d", rx); Serial.print(buf);
+        Serial.print(" "); snprintf(buf, sizeof(buf), "%3d", ry); Serial.print(buf);
+        Serial.print(" "); print_stick_direction(rx, ry);
+
+        Serial.print("  "); snprintf(buf, sizeof(buf), "%3d", l_trigger); Serial.print(buf);
+        Serial.print(" "); print_trigger(l_trigger);
         Serial.print(" "); snprintf(buf, sizeof(buf), "%3d", r_trigger); Serial.print(buf);
+        Serial.print(" "); print_trigger(r_trigger);
 
         Serial.println();
 #endif
@@ -365,7 +454,7 @@ inline void clk2_low() {
         PORTD &= ~_BV(D_CLK2);
 }
 
-/// Pulse the CLK1 line down and the CLK2 line up
+/// Pulse the CLK1 line low and set the CLK2 line up
 /// This is essentially a half-clock cycle for SNES
 inline void pulse_snes() {
 
@@ -417,8 +506,237 @@ inline uint8_t read_byte_mcu()
         value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
         clk1_high();
         delayMicroseconds(MCU_PULSE_TIME_HIGH - TIME_SKEW);
+        //delayMicroseconds(17 - MCU_PULSE_TIME_HIGH);
     }
+    //delayMicroseconds(30 - 17 - MCU_PULSE_TIME_HIGH);
     return value;
+}
+
+//////////////////////////////////////////////////////////
+// Controller Logic
+//////////////////////////////////////////////////////////
+
+void process_none_controller() {
+    CLEAR_STATE
+
+    // Send neutral gamepad report (all released, axes centered)
+    MyCustomHID.sendState(proto, DEVICE_NONE, 0x0000, 0x08, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
+
+    SLEEP_NONE
+    proto = MODE_LN_SR; // switch to SR mode for testing
+}
+
+void process_sr_controller() {
+    uint16_t value = 0x0000;
+
+    noInterrupts();
+    for (int i = 0; i < 16; i++) {
+        pulse_snes();
+        clk2_low();
+        delayMicroseconds(20);
+        value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
+    }
+    pulse_snes();
+    delayMicroseconds(20);
+    interrupts();
+
+    if (PIND & _BV(D_DATA)) {
+        // controller is not present so try as an MCU type next
+        //MyCustomHID.sendState(proto, DEVICE_NONE, 0x0000, DPAD_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
+        proto = MODE_LN_MCU;
+        CLEAR_STATE
+        SLEEP_BETWEEN_PROTOCOLS
+        return;
+    }
+
+    if (good_reads < GOOD_READS_SR) {
+        // not enough good reads yet to confirm presence
+        ++good_reads;
+        MyCustomHID.sendState(proto, DEVICE_NONE, 0x0000, DPAD_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
+        SLEEP_SR
+        return;
+    }
+
+    // dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+    uint8_t dpad = (~value >> 4) & 0x03;
+    dpad |= (~value >> 6) & 0x0C;
+
+    // Extract axes
+    uint8_t ButtonPlus = (dpad & 0x03) == 0x03; // Left/Right bits
+    uint8_t ButtonMinus = (dpad & 0x0C) == 0x0C; // Up/Down bits
+
+    // If both L+R pressed, preserve last L/R
+    if ((dpad & 0x03) == 0x03)
+        dpad = (dpad & ~0x03) | (last_dpad & 0x03);
+
+    // If both U+D pressed, preserve last U/D
+    if ((dpad & 0x0C) == 0x0C)
+        dpad = (dpad & ~0x0C) | (last_dpad & 0x0C);
+
+    // Save last dpad state
+    last_dpad = dpad;
+
+    uint16_t buttons = 0;
+
+    // Map SNES buttons to report bits
+    if (!(value & 0x2000)) buttons |= 0x0001; // B
+    if (!(value & 0x0008)) buttons |= 0x0002; // A
+    if (!(value & 0x1000)) buttons |= 0x0004; // Y
+    if (!(value & 0x0004)) buttons |= 0x0008; // X
+    if (!(value & 0x0800)) buttons |= 0x0010; // Select
+    if (!(value & 0x0400)) buttons |= 0x0020; // Start/*
+    if (!(value & 0x0002)) buttons |= 0x0040; // L
+    if (!(value & 0x0001)) buttons |= 0x0080; // R
+    if (!(value & 0x4000)) buttons |= 0x0400; // Reset/Order
+    if (ButtonPlus)        buttons |= 0x1000; // Plus
+    if (!(value & 0x8000)) buttons |= 0x2000; // Menu
+    if (ButtonMinus)       buttons |= 0x8000; // Minus
+
+    // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+    // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
+    uint8_t hid_hat = 8;
+    switch (dpad) {
+        case 0x08: hid_hat = DPAD_UP;         break; // Up
+        case 0x09: hid_hat = DPAD_UP_RIGHT;   break; // Up-Right
+        case 0x01: hid_hat = DPAD_RIGHT;      break; // Right
+        case 0x05: hid_hat = DPAD_DOWN_RIGHT; break; // Down-Right
+        case 0x04: hid_hat = DPAD_DOWN;       break; // Down
+        case 0x06: hid_hat = DPAD_DOWN_LEFT;  break; // Down-Left
+        case 0x02: hid_hat = DPAD_LEFT;       break; // Left
+        case 0x0A: hid_hat = DPAD_UP_LEFT;    break; // Up-Left
+        default:   hid_hat = DPAD_CENTER;     break; // Centered/neutral
+    }
+
+    MyCustomHID.sendState(proto, DEVICE_LN_SNES, buttons, hid_hat, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
+
+    SLEEP_SR
+}
+
+void process_mcu_controller() {
+    bool mcu_read_success = true;
+    uint8_t buttons1 = 0, buttons2 = 0;
+    bool has_MCU, has_GC, has_forced_fail = false;
+
+    noInterrupts();
+    clock_mpu_hello();
+    buttons1 = read_byte_mcu();
+    buttons2 = read_byte_mcu();
+    uint8_t analog1 = read_byte_mcu();
+    uint8_t analog2 = read_byte_mcu();
+    uint8_t analog3 = read_byte_mcu();
+    uint8_t analog4 = read_byte_mcu();
+    uint8_t analog5 = read_byte_mcu();
+    uint8_t analog6 = read_byte_mcu();
+    read_byte_mcu();
+    interrupts();
+
+    has_MCU = (buttons2 & B10000000);
+    // Check for valid type_flag and not all-high (0xFF)
+    if (has_MCU) {
+        has_GC = (buttons2 & B01000000);
+        if (has_GC) {
+            has_forced_fail = (buttons2 & B00000001);
+            if (has_forced_fail) {
+                mcu_read_success = false; 
+            }
+        }
+    } else {
+        mcu_read_success = false; // this bit seems to be how the real thing knows if it has data
+    }
+
+    if (mcu_read_success) {
+        mcu_fail_count = 0;
+    } else {
+        if (mcu_fail_count < BAD_READS_MCU) {
+            ++mcu_fail_count;
+            SLEEP_MCU
+        } else {
+            proto = MODE_LN_NONE;
+            CLEAR_STATE
+            SLEEP_BETWEEN_PROTOCOLS
+        }
+        return;
+    }
+
+    uint8_t dpad = ~buttons1 & 0x0F; // UDLR bits
+    uint8_t encoded_type = 0;
+
+    if ((dpad & 0x03) == 0x03 || (dpad & 0x0C) == 0x0C) {
+        // If any dpad input exists, block menu detection
+        if (last_dpad == 0) {
+            // Only detect menu/encoded buttons if no dpad input
+            if (dpad == 0x0F) { encoded_type = 1; } // Reset: all 4
+            if (dpad == 0x0C) { encoded_type = 2; } // Menu: up+down
+            if (dpad == 0x03) { encoded_type = 3; } // *: left+right
+            if (dpad == 0x0D) { encoded_type = 4; } // Select: up+down+right
+            if (dpad == 0x0B) { encoded_type = 5; } // Order: up+left+right
+            if (dpad == 0x0E) { encoded_type = 6; } // #: up+down+left
+            if (last_menu == 0) {
+                // we can accept a new menu button
+                last_menu = encoded_type;
+            } if (last_menu != encoded_type) {
+                // can't change menu
+                encoded_type = last_menu;
+            }
+        }
+    } else {
+        last_dpad = dpad;
+        last_menu = 0;
+    }
+
+    if (good_reads < GOOD_READS_MCU) {
+        // not enough good reads yet to confirm presence
+        ++good_reads;
+        MyCustomHID.sendState(proto, DEVICE_NONE, 0x0000, DPAD_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
+        SLEEP_MCU
+        return;
+    }
+
+    // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
+    // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
+    uint8_t hid_hat = DPAD_CENTER;
+    switch (last_dpad) {
+        case 0x08: hid_hat = DPAD_UP;         break; // Up
+        case 0x09: hid_hat = DPAD_UP_RIGHT;   break; // Up-Right
+        case 0x01: hid_hat = DPAD_RIGHT;      break; // Right
+        case 0x05: hid_hat = DPAD_DOWN_RIGHT; break; // Down-Right
+        case 0x04: hid_hat = DPAD_DOWN;       break; // Down
+        case 0x06: hid_hat = DPAD_DOWN_LEFT;  break; // Down-Left
+        case 0x02: hid_hat = DPAD_LEFT;       break; // Left
+        case 0x0A: hid_hat = DPAD_UP_LEFT;    break; // Up-Left
+        default:   hid_hat = DPAD_CENTER;     break; // Centered/neutral
+    }
+
+    // Build and send custom gamepad report for MCU devices
+    uint32_t buttons = 0;
+    // Map buttons for N64/GC
+    if (!(buttons1 & 0x40)) buttons |= 0x00000001;  // B
+    if (!(buttons1 & 0x80)) buttons |= 0x00000002;  // A
+    if (!(buttons1 & 0x20)) buttons |= 0x00000010;  // Z
+    if (!(buttons1 & 0x10)) buttons |= 0x00000020;  // Start
+    if (!(buttons2 & 0x20)) buttons |= 0x00000040;  // L
+    if (!(buttons2 & 0x10)) buttons |= 0x00000080;  // R
+
+    if (encoded_type == 5) buttons |= 0x00000400; // Order
+    if (encoded_type == 1) buttons |= 0x00000800; // Reset
+    if (encoded_type == 2) buttons |= 0x00001000; // Menu
+    if (encoded_type == 6) buttons |= 0x00002000; // #
+    if (encoded_type == 4) buttons |= 0x00004000; // Select
+    if (encoded_type == 3) buttons |= 0x00008000; // *
+
+    if (has_GC) { // GC
+        if (!(buttons2 & 0x08)) buttons |= 0x00000004; // X
+        if (!(buttons2 & 0x04)) buttons |= 0x00000008; // Y
+        MyCustomHID.sendState(proto, DEVICE_LN_GC, buttons, hid_hat, analog1, 255 - analog2, analog3, 255 - analog4, analog5, analog6);
+    } else { // N64
+        if (!(buttons2 & 0x08)) buttons |= 0x00000004; // C-Up
+        if (!(buttons2 & 0x04)) buttons |= 0x00000008; // C-Down
+        if (!(buttons2 & 0x02)) buttons |= 0x00000100; // C-Left
+        if (!(buttons2 & 0x01)) buttons |= 0x00000200; // C-Right
+        MyCustomHID.sendState(proto, DEVICE_LN_N64, buttons, hid_hat, (uint8_t)(analog1 + 128), (uint8_t)(127 - analog2), STICK_CENTER, STICK_CENTER, 0, 0);
+    }
+
+    SLEEP_MCU
 }
 
 //////////////////////////////////////////////////////////
@@ -453,237 +771,13 @@ void loop() {
     switch(proto)
     {
         case MODE_LN_NONE:
-            proto = MODE_LN_SR; // switch to SR mode for testing
-            last_dpad = 0;
-            last_menu = 0;
-            good_reads = 0;
-
-            // Send neutral gamepad report (all released, axes centered)
-            MyCustomHID.sendState(proto, device, 0x00, 0x00, 0x08, 0x80, 0x80, 0x80, 0x80, 0, 0);
-
-            delay(1000); // wait before next read
+            process_none_controller();
             break;
         case MODE_LN_SR:
-            {
-                uint16_t value = 0x0000;
-
-                noInterrupts();
-                
-                for (int i = 0; i < 16; i++) {
-                    pulse_snes();
-                    clk2_low();
-                    delayMicroseconds(20);
-                    value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
-                }
-                pulse_snes();
-                delayMicroseconds(20);
-                bool present = !(PIND & _BV(D_DATA));
-
-                interrupts();
-
-                if (!present) {
-                    proto = MODE_LN_MCU; // try checking for MCU next (maybe do multiple polls first, stock does 12)
-                    device = DEVICE_NONE;
-                    last_dpad = 0;
-                    last_menu = 0;
-                    good_reads = 0;
-
-                    // No controller present, skip processing
-                    delay(60); // wait before next read
-                    break;
-                }
-
-                device = DEVICE_LN_SNES;
-                if (good_reads < GOOD_READS)
-                {
-                    good_reads++;
-                    if (good_reads != GOOD_READS)
-                        break; // don't count this read
-                }
-
-                // dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
-                uint8_t dpad = (~value >> 4) & 0x03;
-                dpad |= (~value >> 6) & 0x0C;
-
-                // Extract axes
-                uint8_t ButtonPlus = (dpad & 0x03) == 0x03; // Left/Right bits
-                uint8_t ButtonMinus = (dpad & 0x0C) == 0x0C; // Up/Down bits
-
-                // If both L+R pressed, preserve last L/R
-                if ((dpad & 0x03) == 0x03) {
-                    dpad = (dpad & ~0x03) | (last_dpad & 0x03);
-                }
-                // If both U+D pressed, preserve last U/D
-                if ((dpad & 0x0C) == 0x0C) {
-                    dpad = (dpad & ~0x0C) | (last_dpad & 0x0C);
-                }
-                last_dpad = dpad;
-
-                // Build and send custom gamepad report
-                uint16_t buttons = 0;
-                // Map SNES buttons to report bits
-                if (!((value >> 13) & 0x01)) buttons |= 0x0001; // B
-                if (!((value >>  3) & 0x01)) buttons |= 0x0002; // A
-                if (!((value >> 12) & 0x01)) buttons |= 0x0004; // Y
-                if (!((value >>  2) & 0x01)) buttons |= 0x0008; // X
-                if (!((value >> 11) & 0x01)) buttons |= 0x0010; // Select
-                if (!((value >> 10) & 0x01)) buttons |= 0x0020; // Start/*
-                if (!((value >>  1) & 0x01)) buttons |= 0x0040; // L
-                if (!((value >>  0) & 0x01)) buttons |= 0x0080; // R
-                if (!((value >> 14) & 0x01)) buttons |= 0x0400; // Reset/Order
-                if (ButtonPlus)              buttons |= 0x1000; // Plus
-                if (!((value >> 15) & 0x01)) buttons |= 0x2000; // Menu
-                if (ButtonMinus)             buttons |= 0x8000; // Minus
-
-                // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
-                // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
-                uint8_t hid_hat = 8;
-                switch (last_dpad) {
-                    case 0x08: hid_hat = 0; break; // Up
-                    case 0x09: hid_hat = 1; break; // Up-Right
-                    case 0x01: hid_hat = 2; break; // Right
-                    case 0x05: hid_hat = 3; break; // Down-Right
-                    case 0x04: hid_hat = 4; break; // Down
-                    case 0x06: hid_hat = 5; break; // Down-Left
-                    case 0x02: hid_hat = 6; break; // Left
-                    case 0x0A: hid_hat = 7; break; // Up-Left
-                    default:   hid_hat = 8; break; // Centered/neutral
-                }
-
-                MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, 0x80, 0x80, 0x80, 0x80, 0, 0);
-
-                delay(65); // wait before next read
-            }
+            process_sr_controller();
             break;
         case MODE_LN_MCU:
-            {
-                static uint8_t mcu_fail_count = 0;
-                bool mcu_read_success = false;
-                uint8_t buttons1 = 0, buttons2 = 0, type_flag1 = 0, type_flag2 = 0;
-
-                noInterrupts();
-                clock_mpu_hello();
-                buttons1 = read_byte_mcu();
-                buttons2 = read_byte_mcu();
-                uint8_t analog1 = read_byte_mcu();
-                uint8_t analog2 = read_byte_mcu();
-                uint8_t analog3 = read_byte_mcu();
-                uint8_t analog4 = read_byte_mcu();
-                uint8_t analog5 = read_byte_mcu();
-                uint8_t analog6 = read_byte_mcu();
-                uint8_t extra = read_byte_mcu();
-                interrupts();
-
-                type_flag1 = (buttons2 & B11000000);
-                type_flag2 = (buttons2 & B11000011);
-                // Check for valid type_flag and not all-high (0xFF)
-                if ((type_flag1 == B10000000 || type_flag2 == B11000010) && buttons2 != 0xFF) {
-                    mcu_read_success = true;
-                }
-
-                if (!mcu_read_success) {
-                    mcu_fail_count++;
-                    if (mcu_fail_count >= 5) {
-                        proto = MODE_LN_NONE;
-                        device = DEVICE_NONE;
-                        last_dpad = 0;
-                        last_menu = 0;
-                        good_reads = 0;
-                        mcu_fail_count = 0;
-                        delay(65); // fallback delay
-                    } else {
-                        delay(5); // short retry delay for fast polling
-                    }
-                    break;
-                } else {
-                    mcu_fail_count = 0;
-                }
-
-                uint8_t dpad = ~buttons1 & 0x0F; // UDLR bits
-                uint8_t encoded_type = 0;
-
-                if ((dpad & 0x03) == 0x03 || (dpad & 0x0C) == 0x0C) {
-                    // If any dpad input exists, block menu detection
-                    if (last_dpad == 0) {
-                            // Only detect menu/encoded buttons if no dpad input
-                            if (dpad == 0x0F) { encoded_type = 1; } // Reset: all 4
-                            else if (dpad == 0x0C) { encoded_type = 2; } // Menu: up+down
-                            else if (dpad == 0x03) { encoded_type = 3; } // *: left+right
-                            else if (dpad == 0x0D) { encoded_type = 4; } // Select: up+down+right
-                            else if (dpad == 0x0B) { encoded_type = 5; } // Order: up+left+right
-                            else if (dpad == 0x0E) { encoded_type = 6; } // #: up+down+left
-                            if (last_menu == 0) {
-                                // we can accept a new menu button
-                                last_menu = encoded_type;
-                            } if (last_menu != encoded_type) {
-                                // can't change menu
-                                encoded_type = last_menu;
-                            }
-                    }
-                } else {
-                        last_dpad = dpad;
-                        last_menu = 0;
-                }
-
-                if (good_reads < GOOD_READS)
-                {
-                    good_reads++;
-                    if (good_reads != GOOD_READS) {
-                        delay(5); // fast polling for active controller
-                        break; // don't count this read
-                    }
-                }
-
-                // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
-                // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
-                uint8_t hid_hat = 8;
-                switch (last_dpad) {
-                    case 0x08: hid_hat = 0; break; // Up
-                    case 0x09: hid_hat = 1; break; // Up-Right
-                    case 0x01: hid_hat = 2; break; // Right
-                    case 0x05: hid_hat = 3; break; // Down-Right
-                    case 0x04: hid_hat = 4; break; // Down
-                    case 0x06: hid_hat = 5; break; // Down-Left
-                    case 0x02: hid_hat = 6; break; // Left
-                    case 0x0A: hid_hat = 7; break; // Up-Left
-                    default:   hid_hat = 8; break; // Centered/neutral
-                }
-
-                // Build and send custom gamepad report for MCU devices
-                uint32_t buttons = 0;
-                // Map buttons for N64/GC
-                if (!((buttons1 >> 6) & 0x01)) buttons |= 0x00000001;  // B
-                if (!((buttons1 >> 7) & 0x01)) buttons |= 0x00000002;  // A
-                if (!((buttons1 >> 5) & 0x01)) buttons |= 0x00000010;  // Z
-                if (!((buttons1 >> 4) & 0x01)) buttons |= 0x00000020;  // Start
-                if (!((buttons2 >> 5) & 0x01)) buttons |= 0x00000040;  // L
-                if (!((buttons2 >> 4) & 0x01)) buttons |= 0x00000080;  // R
-
-                if (encoded_type == 5) buttons |= 0x00000400; // Order
-                if (encoded_type == 1) buttons |= 0x00000800; // Reset
-                if (encoded_type == 2) buttons |= 0x00001000; // Menu
-                if (encoded_type == 6) buttons |= 0x00002000; // #
-                if (encoded_type == 4) buttons |= 0x00004000; // Select
-                if (encoded_type == 3) buttons |= 0x00008000; // *
-
-                if (type_flag1 == B10000000) { // N64
-                    if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // C-Up
-                    if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // C-Down
-                    if (!((buttons2 >> 1) & 0x01)) buttons |= 0x00000100; // C-Left
-                    if (!((buttons2 >> 0) & 0x01)) buttons |= 0x00000200; // C-Right
-                    // N64: signed int8_t, range -128..127, rescale
-                    // N64 only uses X/Y axes, rest zero
-                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, (uint8_t)(analog1 + 128), (uint8_t)(127 - analog2), 0x80, 0x80, 0x00, 0x00);
-                }
-                if (type_flag2 == B11000010) { // GC
-                    if (!((buttons2 >> 3) & 0x01)) buttons |= 0x00000004; // X
-                    if (!((buttons2 >> 2) & 0x01)) buttons |= 0x00000008; // Y
-                    // GC: unsigned uint8_t, range 0..255, convert to signed
-                    MyCustomHID.sendState(proto, device, buttons & 0xFF, (buttons >> 8) & 0xFF, hid_hat, analog1, 255 - analog2, analog3, 255 - analog4, analog5, analog6);
-                }
-
-                delay(5); // fast polling for active controller
-            }
+            process_mcu_controller();
             break;
     }
 }
