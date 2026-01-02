@@ -15,9 +15,9 @@
 // PD7 Pin 6
 
 // Pin mapping
-const uint8_t D_CLK1 = 0; // [IN] Main Clock, Gate Driver
-const uint8_t D_CLK2 = 1; // [IN] Second Clock, SNES Only
-const uint8_t D_DATA = 4; // [OUT] Data
+const uint8_t D_CLK1 = 0; // [OUT] Main Clock, Gate Driver
+const uint8_t D_CLK2 = 1; // [OUT] Second Clock, SNES Only
+const uint8_t D_DATA = 4; // [IN] Data
 
 // bInterval = 1 → host polls every 1 ms → max 1000 reports/s
 // bInterval = 2 → every 2 ms → 500 Hz
