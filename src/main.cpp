@@ -14,6 +14,11 @@
 // PD6 NC
 // PD7 Pin 6
 
+// The IR_DATA line used edge transition timing to function, so we probably need it on Pin 2 or 3 so we can use them as interrupts
+// This would mean moving our CLK1 and CLK2 lines to other pins
+// CLK1 to Pin 4 (PD4) and CLK2 to Pin 6 (PD7)
+// DATA to Pin 12 (PD6) (google suggestion, which this indicates as NC, but we can use another Port if needed for this)
+
 // Pin mapping
 const uint8_t D_CLK1 = 0; // [OUT] Main Clock, Gate Driver
 const uint8_t D_CLK2 = 1; // [OUT] Second Clock, SNES Only
