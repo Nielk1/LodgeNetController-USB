@@ -4,15 +4,23 @@
 #include "PluggableUSB.h"
 #include "HID.h"
 
-// PortD
-// PD0 Pin 3   CLK1
-// PD1 Pin 2   CLK2
-// PD2 Pin 0
-// PD3 Pin 1
-// PD4 Pin 4   DATA
-// PD5 TX LED
-// PD6 NC
-// PD7 Pin 6
+// PIN  PORT  SPI        GAME  TV
+// ---  ----  ---------  ----  ----
+// D15  PB1   SCK(out)   DATA  CLK
+// D14  PB3   MISO(in)   CLK   MTI
+// D16  PB2   MOSI(out)  CLK2  DATA
+
+// PIN  PORT  Ext Interrupt
+// ---  ----  -------------
+// D3   PD0   INT0
+
+// ╔═╤═╤═╤═╤═╤═╤═╗       GAME        TV                MTI
+// ║ │ │ │ │ │ │ ║   1   DATA(in)    CLK(out)          IR(in)
+// ║ 1 2 3 4 5 6 ║   2   CLK(out)    MTI(in)           GND
+// ║             ║   3   12V         N/C               DATA(in)
+// ║             ║   4   CLK2(out)   DATA(out)         N/C
+// ╚════╤═══╤════╝   5   GND         GND               MTI(out)
+//      └───┘        6   IR          IR(out)           CLK(in)
 
 // The IR_DATA line used edge transition timing to function, so we probably need it on Pin 2 or 3 so we can use them as interrupts
 // This would mean moving our CLK1 and CLK2 lines to other pins
@@ -20,9 +28,11 @@
 // DATA to Pin 12 (PD6) (google suggestion, which this indicates as NC, but we can use another Port if needed for this)
 
 // Pin mapping
-const uint8_t D_CLK1 = 0; // [OUT] Main Clock, Gate Driver
-const uint8_t D_CLK2 = 1; // [OUT] Second Clock, SNES Only
-const uint8_t D_DATA = 4; // [IN] Data
+const uint8_t B_DATA = 1; // [IN] Data
+const uint8_t B_CLK1 = 3; // [OUT] Main Clock, Gate Driver
+const uint8_t B_CLK2 = 2; // [OUT] Second Clock, SNES Only
+
+const uint8_t D_IR = 0; // [?] IR signal, normally from TV but bridged to MPI as well
 
 // bInterval = 1 → host polls every 1 ms → max 1000 reports/s
 // bInterval = 2 → every 2 ms → 500 Hz
@@ -37,18 +47,23 @@ const uint8_t D_DATA = 4; // [IN] Data
 //#define MCU_PULSE_TIME_LOW 4
 //#define MCU_PULSE_TIME_HIGH 4
 #define MCU_PULSE_TIME_LOW 6 // if this is too low analog reads become unstable
+//#define MCU_PULSE_TIME_LOW 5 // if this is too low analog reads become unstable
 #define MCU_PULSE_TIME_HIGH 30
+//#define MCU_PULSE_TIME_HIGH 27
 //#define MCU_PULSE_TIME_HIGH 6
 
 #define SR_PULSE_TIME_LOW 3
 #define SR_PULSE_TIME_HIGH 20
+//#define SR_PULSE_TIME_LOW 4
+//#define SR_PULSE_TIME_HIGH 18
+#define SR_PULSE_TIME_LOW2 25
 
 // Time-Skew correction for CLK1
 #define TIME_SKEW 0
 //#define TIME_SKEW 2
 
 // PMOS gate logic: P-channel high-side, active LOW (gate LOW = power ON)
-#define PWR_ACTIVE_LOW true
+#define PWR_ACTIVE_LOW false
 
 #define GOOD_READS_SR 15 // number of consecutive good reads to confirm presence
 #define GOOD_READS_MCU 15 // number of consecutive good reads to confirm presence
@@ -66,6 +81,39 @@ const uint8_t D_DATA = 4; // [IN] Data
 #define DPAD_LEFT 6
 #define DPAD_UP_LEFT 7
 #define DPAD_CENTER 8
+
+#define BUTTON_1 0x00000001
+#define BUTTON_2 0x00000002
+#define BUTTON_3 0x00000004
+#define BUTTON_4 0x00000008
+#define BUTTON_5 0x00000010
+#define BUTTON_6 0x00000020
+#define BUTTON_7 0x00000040
+#define BUTTON_8 0x00000080
+#define BUTTON_9 0x00000100
+#define BUTTON_10 0x00000200
+#define BUTTON_11 0x00000400
+#define BUTTON_12 0x00000800
+#define BUTTON_13 0x00001000
+#define BUTTON_14 0x00002000
+#define BUTTON_15 0x00004000
+#define BUTTON_16 0x00008000
+#define BUTTON_17 0x00010000
+#define BUTTON_18 0x00020000
+#define BUTTON_19 0x00040000
+#define BUTTON_20 0x00080000
+#define BUTTON_21 0x00100000
+#define BUTTON_22 0x00200000
+#define BUTTON_23 0x00400000
+#define BUTTON_24 0x00800000
+#define BUTTON_25 0x01000000
+#define BUTTON_26 0x02000000
+#define BUTTON_27 0x04000000
+#define BUTTON_28 0x08000000
+#define BUTTON_29 0x10000000
+#define BUTTON_30 0x20000000
+#define BUTTON_31 0x40000000
+#define BUTTON_32 0x80000000
 
 #define CLEAR_STATE last_dpad = 0;\
 last_menu = 0;\
@@ -437,26 +485,26 @@ MyCustomHID_ MyCustomHID;
 
 inline void clk1_high() {
     #if PWR_ACTIVE_LOW
-        PORTD &= ~_BV(D_CLK1);
+        PORTB &= ~_BV(B_CLK1);
     #else
-        PORTD |= _BV(D_CLK1);
+        PORTB |= _BV(B_CLK1);
     #endif
 }
 
 inline void clk1_low() {
     #if PWR_ACTIVE_LOW
-        PORTD |= _BV(D_CLK1);
+        PORTB |= _BV(B_CLK1);
     #else
-        PORTD &= ~_BV(D_CLK1);
+        PORTB &= ~_BV(B_CLK1);
     #endif
 }
 
 inline void clk2_high() {
-        PORTD |= _BV(D_CLK2);
+        PORTB |= _BV(B_CLK2);
 }
 
 inline void clk2_low() { 
-        PORTD &= ~_BV(D_CLK2);
+        PORTB &= ~_BV(B_CLK2);
 }
 
 /// Pulse the CLK1 line low and set the CLK2 line up
@@ -465,12 +513,12 @@ inline void pulse_snes() {
 
     // combine CLK1 low and CLK2 high
     #if PWR_ACTIVE_LOW
-        PORTD |= _BV(D_CLK1) | _BV(D_CLK2);
+        PORTB |= _BV(B_CLK1) | _BV(B_CLK2);
     #else
-        uint8_t portd = PIND;
-        portd &= ~_BV(D_CLK1);
-        portd |= _BV(D_CLK2);
-        PORTD = portd;
+        uint8_t portb = PINB;
+        portb &= ~_BV(B_CLK1);
+        portb |= _BV(B_CLK2);
+        PORTB = portb;
     #endif
 
     delayMicroseconds(SR_PULSE_TIME_LOW + TIME_SKEW);
@@ -508,7 +556,7 @@ inline uint8_t read_byte_mcu()
     for(int j=0;j<8;j++){
         clk1_low();
         delayMicroseconds(MCU_PULSE_TIME_LOW + TIME_SKEW);
-        value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
+        value = (value << 1) | ((PINB & _BV(B_DATA)) ? 1 : 0);
         clk1_high();
         delayMicroseconds(MCU_PULSE_TIME_HIGH - TIME_SKEW);
         //delayMicroseconds(17 - MCU_PULSE_TIME_HIGH);
@@ -538,14 +586,14 @@ void process_sr_controller() {
     for (int i = 0; i < 16; i++) {
         pulse_snes();
         clk2_low();
-        delayMicroseconds(20);
-        value = (value << 1) | ((PIND & _BV(D_DATA)) ? 1 : 0);
+        delayMicroseconds(SR_PULSE_TIME_LOW2 + TIME_SKEW);
+        value = (value << 1) | ((PINB & _BV(B_DATA)) ? 1 : 0);
     }
     pulse_snes();
-    delayMicroseconds(20);
+    delayMicroseconds(SR_PULSE_TIME_LOW2 + TIME_SKEW);
     interrupts();
 
-    if (PIND & _BV(D_DATA)) {
+    if (PINB & _BV(B_DATA)) {
         // controller is not present so try as an MCU type next
         //MyCustomHID.sendState(proto, DEVICE_NONE, 0x0000, DPAD_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, STICK_CENTER, 0, 0);
         proto = MODE_LN_MCU;
@@ -584,18 +632,18 @@ void process_sr_controller() {
     uint16_t buttons = 0;
 
     // Map SNES buttons to report bits
-    if (!(value & 0x2000)) buttons |= 0x0001; // B
-    if (!(value & 0x0008)) buttons |= 0x0002; // A
-    if (!(value & 0x1000)) buttons |= 0x0004; // Y
-    if (!(value & 0x0004)) buttons |= 0x0008; // X
-    if (!(value & 0x0800)) buttons |= 0x0010; // Select
-    if (!(value & 0x0400)) buttons |= 0x0020; // Start/*
-    if (!(value & 0x0002)) buttons |= 0x0040; // L
-    if (!(value & 0x0001)) buttons |= 0x0080; // R
-    if (!(value & 0x4000)) buttons |= 0x0400; // Reset/Order
-    if (ButtonPlus)        buttons |= 0x1000; // Plus
-    if (!(value & 0x8000)) buttons |= 0x2000; // Menu
-    if (ButtonMinus)       buttons |= 0x8000; // Minus
+    if (!(value & 0x2000)) buttons |= BUTTON_1; // B
+    if (!(value & 0x0008)) buttons |= BUTTON_2; // A
+    if (!(value & 0x1000)) buttons |= BUTTON_3; // Y
+    if (!(value & 0x0004)) buttons |= BUTTON_4; // X
+    if (!(value & 0x0800)) buttons |= BUTTON_5; // Select
+    if (!(value & 0x0400)) buttons |= BUTTON_6; // Start/*
+    if (!(value & 0x0002)) buttons |= BUTTON_7; // L
+    if (!(value & 0x0001)) buttons |= BUTTON_8; // R
+    if (!(value & 0x4000)) buttons |= BUTTON_10; // Reset/Order
+    if (ButtonPlus)        buttons |= BUTTON_11; // Plus
+    if (!(value & 0x8000)) buttons |= BUTTON_12; // Menu
+    if (ButtonMinus)       buttons |= BUTTON_16; // Minus
 
     // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
     // Map to HID hat switch (0=Up, 1=Up-Right, ..., 7=Up-Left, 8=Centered)
@@ -628,11 +676,11 @@ void process_mcu_controller() {
     buttons2 = read_byte_mcu();
     uint8_t analog1 = read_byte_mcu();
     uint8_t analog2 = read_byte_mcu();
-    uint8_t analog3 = read_byte_mcu();
-    uint8_t analog4 = read_byte_mcu();
-    uint8_t analog5 = read_byte_mcu();
-    uint8_t analog6 = read_byte_mcu();
-    read_byte_mcu();
+    uint8_t analog3 = read_byte_mcu(); // if we're n64 mode this is extra, but who cares, we can just ignore it
+    uint8_t analog4 = read_byte_mcu(); // "
+    uint8_t analog5 = read_byte_mcu(); // "
+    uint8_t analog6 = read_byte_mcu(); // "
+    read_byte_mcu(); // extra just to make sure we've cleared the buffer
     interrupts();
 
     has_MCU = (buttons2 & B10000000);
@@ -713,31 +761,31 @@ void process_mcu_controller() {
     }
 
     // Build and send custom gamepad report for MCU devices
-    uint32_t buttons = 0;
+    uint16_t buttons = 0;
     // Map buttons for N64/GC
-    if (!(buttons1 & 0x40)) buttons |= 0x00000001;  // B
-    if (!(buttons1 & 0x80)) buttons |= 0x00000002;  // A
-    if (!(buttons1 & 0x20)) buttons |= 0x00000010;  // Z
-    if (!(buttons1 & 0x10)) buttons |= 0x00000020;  // Start
-    if (!(buttons2 & 0x20)) buttons |= 0x00000040;  // L
-    if (!(buttons2 & 0x10)) buttons |= 0x00000080;  // R
+    if (!(buttons1 & 0x40)) buttons |= BUTTON_1;  // B
+    if (!(buttons1 & 0x80)) buttons |= BUTTON_2;  // A
+    if (!(buttons1 & 0x20)) buttons |= BUTTON_5;  // Z
+    if (!(buttons1 & 0x10)) buttons |= BUTTON_6;  // Start
+    if (!(buttons2 & 0x20)) buttons |= BUTTON_7;  // L
+    if (!(buttons2 & 0x10)) buttons |= BUTTON_8;  // R
 
-    if (encoded_type == 5) buttons |= 0x00000400; // Order
-    if (encoded_type == 1) buttons |= 0x00000800; // Reset
-    if (encoded_type == 2) buttons |= 0x00001000; // Menu
-    if (encoded_type == 6) buttons |= 0x00002000; // #
-    if (encoded_type == 4) buttons |= 0x00004000; // Select
-    if (encoded_type == 3) buttons |= 0x00008000; // *
+    if (encoded_type == 5) buttons |= BUTTON_11; // Order
+    if (encoded_type == 1) buttons |= BUTTON_12; // Reset
+    if (encoded_type == 2) buttons |= BUTTON_13; // Menu
+    if (encoded_type == 6) buttons |= BUTTON_14; // #
+    if (encoded_type == 4) buttons |= BUTTON_15; // Select
+    if (encoded_type == 3) buttons |= BUTTON_16; // *
 
     if (has_GC) { // GC
-        if (!(buttons2 & 0x08)) buttons |= 0x00000004; // X
-        if (!(buttons2 & 0x04)) buttons |= 0x00000008; // Y
+        if (!(buttons2 & 0x08)) buttons |= BUTTON_3; // X
+        if (!(buttons2 & 0x04)) buttons |= BUTTON_4; // Y
         MyCustomHID.sendState(proto, DEVICE_LN_GC, buttons, hid_hat, analog1, 255 - analog2, analog3, 255 - analog4, analog5, analog6);
     } else { // N64
-        if (!(buttons2 & 0x08)) buttons |= 0x00000004; // C-Up
-        if (!(buttons2 & 0x04)) buttons |= 0x00000008; // C-Down
-        if (!(buttons2 & 0x02)) buttons |= 0x00000100; // C-Left
-        if (!(buttons2 & 0x01)) buttons |= 0x00000200; // C-Right
+        if (!(buttons2 & 0x08)) buttons |= BUTTON_3; // C-Up
+        if (!(buttons2 & 0x04)) buttons |= BUTTON_4; // C-Down
+        if (!(buttons2 & 0x02)) buttons |= BUTTON_9; // C-Left
+        if (!(buttons2 & 0x01)) buttons |= BUTTON_10; // C-Right
         MyCustomHID.sendState(proto, DEVICE_LN_N64, buttons, hid_hat, (uint8_t)(analog1 + 128), (uint8_t)(127 - analog2), STICK_CENTER, STICK_CENTER, 0, 0);
     }
 
@@ -762,12 +810,12 @@ void setup() {
 
     Serial.println(F("LodgeNet USB test host starting..."));
 
-    DDRD |= _BV(D_CLK1) | _BV(D_CLK2);
+    DDRB |= _BV(B_CLK1) | _BV(B_CLK2);
     clk1_high();
     clk2_high();
 
     // Ensure data pin is input with internal pull-up
-    pinMode(D_DATA, INPUT_PULLUP);
+    pinMode(B_DATA, INPUT_PULLUP);
 
     Serial.println(F("LodgeNet USB test host starting..."));
 }
