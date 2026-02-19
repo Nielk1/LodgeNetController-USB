@@ -44,26 +44,16 @@ const uint8_t D_IR = 0; // [?] IR signal, normally from TV but bridged to MPI as
 #define LOG_TO_SERIAL true
 
 #define MCU_HELLO_PULSE 7
-//#define MCU_PULSE_TIME_LOW 4
-//#define MCU_PULSE_TIME_HIGH 4
 #define MCU_PULSE_TIME_LOW 6 // if this is too low analog reads become unstable
-//#define MCU_PULSE_TIME_LOW 5 // if this is too low analog reads become unstable
 #define MCU_PULSE_TIME_HIGH 30
-//#define MCU_PULSE_TIME_HIGH 27
-//#define MCU_PULSE_TIME_HIGH 6
 
 #define SR_PULSE_TIME_LOW 3
 #define SR_PULSE_TIME_HIGH 20
-//#define SR_PULSE_TIME_LOW 4
-//#define SR_PULSE_TIME_HIGH 18
 #define SR_PULSE_TIME_LOW2 25
 
 // Time-Skew correction for CLK1
 #define TIME_SKEW 0
-//#define TIME_SKEW 2
 
-// PMOS gate logic: P-channel high-side, active LOW (gate LOW = power ON)
-#define PWR_ACTIVE_LOW false
 
 #define GOOD_READS_SR 15 // number of consecutive good reads to confirm presence
 #define GOOD_READS_MCU 15 // number of consecutive good reads to confirm presence
@@ -484,42 +474,29 @@ MyCustomHID_ MyCustomHID;
 //////////////////////////////////////////////////////////
 
 inline void clk1_high() {
-    #if PWR_ACTIVE_LOW
-        PORTB &= ~_BV(B_CLK1);
-    #else
-        PORTB |= _BV(B_CLK1);
-    #endif
+    DDRB &= ~_BV(B_CLK1); // Set as input for high (external pullup)
 }
 
 inline void clk1_low() {
-    #if PWR_ACTIVE_LOW
-        PORTB |= _BV(B_CLK1);
-    #else
-        PORTB &= ~_BV(B_CLK1);
-    #endif
+    DDRB |= _BV(B_CLK1);  // Set as output
 }
 
 inline void clk2_high() {
-        PORTB |= _BV(B_CLK2);
+    DDRB &= ~_BV(B_CLK2); // Set as input for high (external pullup)
 }
 
 inline void clk2_low() { 
-        PORTB &= ~_BV(B_CLK2);
+    DDRB |= _BV(B_CLK2);  // Set as output
 }
 
 /// Pulse the CLK1 line low and set the CLK2 line up
 /// This is essentially a half-clock cycle for SNES
 inline void pulse_snes() {
 
-    // combine CLK1 low and CLK2 high
-    #if PWR_ACTIVE_LOW
-        PORTB |= _BV(B_CLK1) | _BV(B_CLK2);
-    #else
-        uint8_t portb = PINB;
-        portb &= ~_BV(B_CLK1);
-        portb |= _BV(B_CLK2);
-        PORTB = portb;
-    #endif
+    // Set CLK1 low (output low) and CLK2 high (input)
+    DDRB |= _BV(B_CLK1);
+    DDRB &= ~_BV(B_CLK2);
+    //PORTB &= ~_BV(B_CLK1);
 
     delayMicroseconds(SR_PULSE_TIME_LOW + TIME_SKEW);
 
@@ -640,9 +617,9 @@ void process_sr_controller() {
     if (!(value & 0x0400)) buttons |= BUTTON_6; // Start/*
     if (!(value & 0x0002)) buttons |= BUTTON_7; // L
     if (!(value & 0x0001)) buttons |= BUTTON_8; // R
-    if (!(value & 0x4000)) buttons |= BUTTON_10; // Reset/Order
-    if (ButtonPlus)        buttons |= BUTTON_11; // Plus
-    if (!(value & 0x8000)) buttons |= BUTTON_12; // Menu
+    if (!(value & 0x4000)) buttons |= BUTTON_11; // Reset/Order
+    if (ButtonPlus)        buttons |= BUTTON_13; // Plus
+    if (!(value & 0x8000)) buttons |= BUTTON_14; // Menu
     if (ButtonMinus)       buttons |= BUTTON_16; // Minus
 
     // Dpad bits: 0=Right, 1=Left, 2=Down, 3=Up
@@ -810,12 +787,13 @@ void setup() {
 
     Serial.println(F("LodgeNet USB test host starting..."));
 
-    DDRB |= _BV(B_CLK1) | _BV(B_CLK2);
+    DDRB &= ~(_BV(B_CLK1) | _BV(B_CLK2)); // Set CLK pins as input initially (high via external pullup)
     clk1_high();
     clk2_high();
 
     // Ensure data pin is input with internal pull-up
     pinMode(B_DATA, INPUT_PULLUP);
+    PORTB &= ~_BV(B_CLK1);
 
     Serial.println(F("LodgeNet USB test host starting..."));
 }
