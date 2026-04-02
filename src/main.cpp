@@ -557,6 +557,13 @@ void process_none_controller() {
 }
 
 void process_sr_controller() {
+    // S - Select
+    // * - Start
+    // O - Reset/Order
+    // M - Menu
+    // SNES: B Y S * ↑ ↓ ← → A X L R 1 1 1 1
+    // LODG: M O B Y S * ↑ ↓ 1 1 ← → A X L R
+
     uint16_t value = 0x0000;
 
     noInterrupts();
