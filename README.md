@@ -89,16 +89,26 @@ Reads            ^            ^
 * Latch low pulse are 3 us
 * Highs between latches are 42 us
 * Clock highs are about 20 us
-* CLock lows are about 25 us
-* We read the value of the data line immediately before setting clock high
+* Clock lows are about 25 us
+* Read the value of the data line immediately before setting clock high
 * The unusual Data low after the 16th bit (effectively a 17th bit) is a quirk of the hardware and is useful in detecting a Shift Register type controller is attached.
 
 ### MCU Based
+```
+               v          v
+               |          |
+Clock ────────┐|─────────┐|─────────
+              └|         └|         
+Data  ─────────|┌─────────|┌────────
+      ─────────|┘─────────|┘────────
+               |          |
+               ^          ^
+```
 Always read 9 bytes.  This bypasses any possible issues with confusing N64 and GC controllers due to quirks or communication problems.
-
 * Trigger double pulse is 7 us
 * Clock low pulses are 6 us
 * Time between pulses is 30 us, no extra delay between bytes
+* Read the value of the data line immediately before setting clock high
 
 # Current Knowledge
 The controllers can operate at a minimum of ~3.2V, but this is the bottom edge of their stability.  Given the MCU based controllers have a voltage drop of at least 0.1V, and the long cable can drop similar, a 3.3V input really is just on the line.  The linear regulator inside the MCU baed controllers will output a clean 5.00V when supplied with at least 5.5V, but will pass through lower voltages.
@@ -106,4 +116,8 @@ The controllers can operate at a minimum of ~3.2V, but this is the bottom edge o
 Thus, 3.3V is likely too low to drive the MCU controllers, 5V appears to be enough though then the Linear Regulators are simply passing the input voltage less their voltage drop.
 
 # Version 0.1
-This is the first iteration. It features BAT diodes for each data line to the 5V rail to ensure accidently crossing the "12V" line to a data line will be disipated. The "12V" line is running with 10V via a voltage doubler.
+This is the first iteration.
+It features BAT diodes for each data line to the 5V rail to ensure accidently crossing the "12V" line to a data line will be disipated.
+The "12V" line is running with 10V via a voltage doubler.
+All signals are high via external pullup because the CLK1 line had to be so and simultanious toggling of Direction and State of a port at the same time are not possible.
+The CLK1 line had to be externally pulled up because for the SNES controller it charges a capacitor used for main power in the controller and thus had to survive current inrush.
