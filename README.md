@@ -5,13 +5,13 @@ This project has been ongoing for some times, but without a working LBT-44C the 
 
 ## Pinout (Female)
 ```
-╔═╤═╤═╤═╤═╤═╤═╗                    SNES              N64/GC
-║ │ │ │ │ │ │ ║   1   DATA(in)     DATA(out)         DATA(out)
-║ 1 2 3 4 5 6 ║   2   CLK1(out)    Power/Latch(in)   CLK
-║             ║   3   12V          N/C               12V
-║             ║   4   CLK2(out)    Clock             N/C
-╚════╤═══╤════╝   5   GND          GND               GND
-     └───┘        6   IR(unused)   N/C               N/C
+╔═╤═╤═╤═╤═╤═╤═╗              SNES          N64/GC
+║ │ │ │ │ │ │ ║   1   DATA   DATA          DATA(in)
+║ 1 2 3 4 5 6 ║   2   CLK1   Power/Latch   Clock(out)
+║             ║   3   12V    -             12V
+║             ║   4   CLK2   Clock(out)    -
+╚════╤═══╤════╝   5   GND    GND           GND
+     └───┘        6   IR     -             -
 ```
 
 ## Devices
