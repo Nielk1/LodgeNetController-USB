@@ -102,7 +102,7 @@ Clock ────────┐|─────────┐|─────
 Data  ─────────|┌─────────|┌────────
       ─────────|┘─────────|┘────────
                |          |
-               ^          ^
+Reads          ^          ^
 ```
 Always read 9 bytes.  This bypasses any possible issues with confusing N64 and GC controllers due to quirks or communication problems.
 * Trigger double pulse is 7 us
