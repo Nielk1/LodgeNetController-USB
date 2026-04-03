@@ -47,13 +47,14 @@ If bits are pending these can be misunderstood as more clock pulses for pushing 
 Also note that the N64 controller has far tighter tollerances than the GC controller.
 
 ```
-      |      Trigger       |     Read a byte (4 bytes for N64, 8 for GC)                                           |
-      |                    |                                                                                       |
-      |    6 6 6    26us   4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  30us  4us
+      |  Trigger  | Read a byte (loop 4 times for N64, 8 times for GC)                                    |
+      |           |                                                                                       |
+      |    6 6 6  | 26us   4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  18us  4us  30us  4us
 Clock ────┐ ┌─┐ ┌──────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─────────┐┌─---
           └─┘ └─┘          └┘         └┘         └┘         └┘         └┘         └┘         └┘         └┘         └┘
-Data  ───────────────────────┐──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌---
-                             └──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘---
+Data  ────────────┐──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌──────────┌---
+                  └──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘──────────┘---
+                      MSB                                                                          LSB
 ```
 
 * The trigger is a 6 us low-high-low pulse.
