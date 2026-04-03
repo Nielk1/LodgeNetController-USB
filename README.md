@@ -36,6 +36,9 @@ Data  ───────┐──────────┌─┐───�
 * Clock highs are about 19.5 us
 * CLock lows are about 26 us
 * ??? low on Data is about 650 us
+* The additional extra buttons are generated via illegal directional input combinations
+  * `←`+`→` Plus Button (`+`)
+  * `↑`+`↓` Minus Button (`-`)
 
 ### MCU Based
 The Nintendo 64 (N64) and Game Cube (GC) style controllers utilize an MCU and thus are more capable and specialized.
@@ -69,6 +72,13 @@ Data  ───────────────────────┐�
   * `[5]` C-Y Axis
   * `[6]` Left Trigger
   * `[7]` Right Trigger
+* The additional extra buttons are generated via illegal directional input combinations
+  * `↑`+`↓`+`←`+`→` Reset Button
+  * `↑`+`↓`         Menu Button
+  * `←`+`→`         * Button
+  * `↑`+`↓`+`→`     Select Button
+  * `↑`+`←`+`→`     Order Button
+  * `↑`+`↓`+`←`     # Button
 
 ## Implementation
 A controller must successfully poll multiple times before the hotplug detects it is attached.
