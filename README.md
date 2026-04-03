@@ -9,7 +9,7 @@ From this, I was able to sniff protocol traffic for all 3 controller types and c
 This interface thus predates the new interest in LodgeNet hardware after the discovery and release of a controller testing ROM.
 
 ## Table of Contents
-- [Pinout (Female)](#pinout-female)
+- [Pinout](#pinout)
 - [Devices](#devices)
   - [Shift Register Based](#shift-register-based)
   - [MCU Based](#mcu-based)
@@ -19,15 +19,16 @@ This interface thus predates the new interest in LodgeNet hardware after the dis
 - [Current Knowledge](#current-knowledge)
 - [Version 0.1](#version-01)
 
-## Pinout (Female)
+## Pinout
 ```
-╔═╤═╤═╤═╤═╤═╤═╗
-║ │ │ │ │ │ │ ║
-║ 1 2 3 4 5 6 ║
-║             ║
-║             ║
-╚════╤═══╤════╝
-     └───┘
+     Female             Male
+╔═╤═╤═╤═╤═╤═╤═╗    ╭─┬─┬─┬─┬─┬─┬─╮
+║ │ │ │ │ │ │ ║    │ │ │ │ │ │ │ │
+║ 1 2 3 4 5 6 ║    │ 6 5 4 3 2 1 │
+║             ║    │             │
+║             ║    │             │
+╚════╤═══╤════╝    ╰────╒═══╕────╯
+     └───┘              └───┘
 ```
 
 | Pin | Signal | SNES        | N64/GC |
