@@ -58,17 +58,17 @@ Data  ───────────────────────┐�
 * After the trigger and each byte there is a delay of 26 to 32 us, likely from processing lag.
 * Transmitted MSB
 * Bytes (N64 is 4 bytes, GC is 8 bytes) (N64 is signed, GC is unsigned)
-  0. Buttons 1 (low is pressed)
-    * `A B Z Start ↑ ↓ ← →`
-  1. Buttons 2 (low is pressed)
-    * N64: `1 0 L R C↑ C↓ C← C→`
-    * GC: `1 1 L R X Y ? ?` (please correct the `?`s if you can)
-  2. X Axis
-  3. Y Axis
-  4. C-X Axis
-  5. C-Y Axis
-  6. Left Trigger
-  7. Right Trigger
+  1. Buttons 1 (low is pressed)
+     * `A B Z Start ↑ ↓ ← →`
+  2. Buttons 2 (low is pressed)
+     * N64: `1 0 L R C↑ C↓ C← C→`
+     * GC: `1 1 L R X Y ? ?` (please correct the `?`s if you can)
+  3. X Axis
+  4. Y Axis
+  5. C-X Axis
+  6. C-Y Axis
+  7. Left Trigger
+  8. Right Trigger
 
 ## Implementation
 A controller must successfully poll multiple times before the hotplug detects it is attached.
